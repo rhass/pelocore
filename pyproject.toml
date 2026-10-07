@@ -1,0 +1,70 @@
+[project]
+name = "pelocore"
+version = "0.1.0"
+description = "Bridge that syncs Peloton workouts to COROS as FIT files"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Ryan" }]
+requires-python = ">=3.11"
+dependencies = [
+    # PyPI releases of pylotoncycle are stale (0.5.2 lacks OAuth refresh);
+    # pin the maintained main branch by commit.
+    "pylotoncycle @ git+https://github.com/justmedude/pylotoncycle@54feb131d226de8534be88db650574c9e04d8f9c",
+    "fit-tool>=0.9.14,<0.10",
+    "requests>=2.32,<3",
+    "pydantic-settings>=2.4,<3",
+]
+
+[project.scripts]
+pelocore = "pelocore.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=5",
+    "responses>=0.25",
+    "freezegun>=1.5",
+    "mypy>=1.11",
+    "types-requests",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pelocore"]
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RET", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = ["live: tests that hit real services; enable with PELOCORE_LIVE=1"]
+
+[tool.coverage.run]
+source = ["src/pelocore"]
+omit = ["src/pelocore/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["pylotoncycle.*", "fit_tool.*"]
+ignore_missing_imports = true

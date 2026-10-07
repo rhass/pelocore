@@ -1,0 +1,98 @@
+# pelocore in service (loop) mode: internal sync loop + status page.
+#   kubectl apply -f deployment.yaml
+#
+# Single replica: two syncers would race on /data/state.json and double-upload
+# between reconcile checks. Scale out only with per-pod state paths.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pelocore
+  labels:
+    app.kubernetes.io/name: pelocore
+    app.kubernetes.io/version: "0.1.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pelocore
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pelocore
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pelocore
+          image: ghcr.io/OWNER/PELOCORE:latest  # replace after first release
+          imagePullPolicy: IfNotPresent
+          args: ["run"]
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: pelocore
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: state
+              mountPath: /data
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: pelocore-state
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pelocore
+  labels:
+    app.kubernetes.io/name: pelocore
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: pelocore
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# Durable state across pod restarts. Optional: without it the pod starts with
+# empty state and reconciles against the COROS import list instead.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pelocore-state
+  labels:
+    app.kubernetes.io/name: pelocore
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 16Mi

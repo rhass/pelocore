@@ -1,0 +1,37 @@
+min_version = "2024.9.5"
+
+[tools]
+python = "3.13"
+uv = "latest"
+ruff = "latest"
+
+[settings]
+python.uv_venv_auto = "create|source"
+
+[env]
+UV_PROJECT_ENVIRONMENT = ".venv"
+
+[tasks.install]
+description = "Install dependencies"
+alias = "i"
+run = "uv sync --all-groups"
+
+[tasks.run]
+description = "Run the bridge (loop mode with status server)"
+run = "uv run pelocore run"
+
+[tasks.test]
+description = "Run tests"
+run = "uv run pytest"
+
+[tasks.lint]
+description = "Lint the code"
+run = "uv run ruff check src tests"
+
+[tasks.typecheck]
+description = "Type-check the code"
+run = "uv run mypy"
+
+[tasks.docker-build]
+description = "Build the container image"
+run = "docker build -t pelocore:dev ."

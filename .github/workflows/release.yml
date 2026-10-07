@@ -1,0 +1,250 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and scan but do not push, sign, or release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
+  # Runtime base image. DHI (Docker Hardened Images, dhi.io) is used when a
+  # Docker Hub access token is configured; standard slim images otherwise.
+  # See README "Base image" for Iron Bank / Minimus swap instructions.
+  DHI_BASE_IMAGE: dhi.io/python:3.13
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up toolchain (mise)
+        uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
+
+      - name: Lint
+        run: mise run lint
+
+      - name: Typecheck
+        run: mise run typecheck
+
+      - name: Test
+        run: mise run test
+
+  build:
+    needs: verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest_amd64: ${{ steps.push.outputs.digest_amd64 }}
+      digest_arm64: ${{ steps.push.outputs.digest_arm64 }}
+      version: ${{ steps.meta.outputs.version }}
+      pushed: ${{ steps.push.outputs.pushed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to Docker Hub (DHI base image)
+        id: dhi_login
+        if: ${{ env.DOCKERHUB_TOKEN != '' && env.DOCKERHUB_USERNAME != '' }}
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: dhi.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+
+      - name: Resolve base image
+        id: base
+        run: |
+          if [ -n "${DOCKERHUB_TOKEN}" ]; then
+            echo "image=${DHI_BASE_IMAGE}" >> "$GITHUB_OUTPUT"
+            echo "Using hardened base: ${DHI_BASE_IMAGE}"
+          else
+            echo "image=python:3.13-slim" >> "$GITHUB_OUTPUT"
+            echo "DOCKERHUB_TOKEN not set; using python:3.13-slim"
+          fi
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Build amd64 first, scan it, and only then push both architectures.
+      - name: Build amd64 for scanning
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          build-args: |
+            BASE_IMAGE=${{ steps.base.outputs.image }}
+          tags: pelocore:scan
+
+      - name: Trivy image scan (gate)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: pelocore:scan
+          scanners: vuln
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=long
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+          labels: |
+            org.opencontainers.image.title=pelocore
+            org.opencontainers.image.description=Bridge that syncs Peloton workouts to COROS as FIT files
+            org.opencontainers.image.licenses=Apache-2.0
+
+      # amd64: build and push by digest.
+      - name: Push amd64 by digest
+        id: push_amd64
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: ${{ !inputs.dry_run }}
+          build-args: |
+            BASE_IMAGE=${{ steps.base.outputs.image }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true
+
+      # arm64: build and push by digest.
+      - name: Push arm64 by digest
+        id: push_arm64
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: ${{ !inputs.dry_run }}
+          build-args: |
+            BASE_IMAGE=${{ steps.base.outputs.image }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true
+
+      - name: Record digests
+        id: push
+        run: |
+          echo "digest_amd64=${{ steps.push_amd64.outputs.digest }}" >> "$GITHUB_OUTPUT"
+          echo "digest_arm64=${{ steps.push_arm64.outputs.digest }}" >> "$GITHUB_OUTPUT"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A manifest list is required so a tag points at both architectures.
+      - name: Create manifest list and push
+        if: ${{ inputs.dry_run != true }}
+        working-directory: /tmp
+        run: |
+          IMAGE="${{ env.REGISTRY_IMAGE }}"
+          for tag in ${{ steps.meta.outputs.tags }}; do
+            docker buildx imagetools create \
+              -t "$tag" \
+              "${IMAGE}@${{ steps.push_amd64.outputs.digest }}" \
+              "${IMAGE}@${{ steps.push_arm64.outputs.digest }}"
+          done
+
+  sign:
+    needs: build
+    if: ${{ needs.build.outputs.pushed == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # required for keyless OIDC signing
+    steps:
+      - name: Install cosign
+        uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Sign by digest (tags are mutable); keyless uses the workflow's OIDC
+      # identity as the certificate issuer.
+      - name: Sign images (keyless)
+        env:
+          IMAGE: ${{ env.REGISTRY_IMAGE }}
+          DIGEST_AMD64: ${{ needs.build.outputs.digest_amd64 }}
+          DIGEST_ARM64: ${{ needs.build.outputs.digest_arm64 }}
+        run: |
+          cosign sign --yes "${IMAGE}@${DIGEST_AMD64}"
+          cosign sign --yes "${IMAGE}@${DIGEST_ARM64}"
+
+      - name: Generate CycloneDX SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.REGISTRY_IMAGE }}@${{ needs.build.outputs.digest_amd64 }}
+          format: cyclonedx
+          output: sbom.cdx.json
+          exit-code: "0"
+
+      - name: Attest SBOM (keyless)
+        env:
+          IMAGE: ${{ env.REGISTRY_IMAGE }}
+          DIGEST_AMD64: ${{ needs.build.outputs.digest_amd64 }}
+        run: |
+          cosign attest --yes --predicate sbom.cdx.json --type cyclonedx \
+            "${IMAGE}@${DIGEST_AMD64}"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-name: ${{ env.REGISTRY_IMAGE }}
+          subject-digest: sha256:${{ needs.build.outputs.digest_amd64 }}
+          push-to-registry: true
+
+  release:
+    needs: [build, sign]
+    if: ${{ needs.build.outputs.pushed == 'true' && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          generate_release_notes: true

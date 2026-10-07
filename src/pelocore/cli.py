@@ -105,7 +105,17 @@ def _cmd_run(settings: Settings) -> int:
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
-    server.start()
+    try:
+        server.start()
+    except OSError as exc:
+        logger.error(
+            "could not start status server on %s:%s (%s). "
+            "Free the port or set PELOCORE_SERVER_PORT.",
+            settings.server_host,
+            settings.server_port,
+            exc.strerror or exc,
+        )
+        return EXIT_FAILED
     server.wait()
     return EXIT_OK
 

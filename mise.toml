@@ -4,6 +4,7 @@ min_version = "2024.9.5"
 python = "3.13"
 uv = "latest"
 ruff = "latest"
+act = "latest"
 
 [settings]
 python.uv_venv_auto = "create|source"
@@ -35,3 +36,17 @@ run = "uv run mypy"
 [tasks.docker-build]
 description = "Build the container image"
 run = "docker build -t pelocore:dev ."
+
+[tasks.act-ci]
+description = "Run CI workflow locally with act (requires Docker)"
+# The runner image (~1.2 GB) is pulled once; pre-pulling makes progress
+# visible instead of act appearing stuck on its first run. Scoped with -W:
+# bare `act push` would also run release.yml (act ignores tag filters).
+run = """
+docker pull -q catthehacker/ubuntu:act-24.04
+act push --workflows ci.yml
+"""
+
+[tasks.act-release-verify]
+description = "Run release verify job locally with act (requires Docker)"
+run = "act workflow_dispatch --workflows release.yml --job verify --input dry_run=true"

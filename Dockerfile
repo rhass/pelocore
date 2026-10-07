@@ -35,6 +35,14 @@ FROM ${BASE_IMAGE} AS runtime
 
 COPY --from=builder /app/.venv /app/.venv
 
+# The runtime never installs packages (uv manages the venv, which has no pip),
+# so drop the base image's pip. Its vendored dependencies (msgpack, urllib3,
+# pkg_resources) otherwise surface as HIGH findings in image vulnerability
+# scans despite being unreachable at runtime.
+RUN rm -rf /usr/local/lib/python3.13/site-packages/pip \
+            /usr/local/lib/python3.13/site-packages/pip-*.dist-info \
+            /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.13
+
 ENV PATH="/app/.venv/bin:$PATH" \
     PELOCORE_STATE_PATH=/data/state.json
 

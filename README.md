@@ -176,6 +176,23 @@ Live smoke tests against the real services are opt-in:
 $ PELOCORE_LIVE=1 mise exec -- uv run pytest -m live
 ```
 
+### Local CI with act
+
+The CI and release workflows can run locally with
+[nektos/act](https://nektosact.com) (installed via mise; requires Docker).
+This catches CI-only behavior differences — action wrappers, job wiring —
+before pushing:
+
+```console
+$ mise run act-ci                 # verify + both Trivy scans
+$ mise run act-release-verify     # release verify/build path (dry-run)
+```
+
+Runner images and architecture come from `.actrc`. What act cannot exercise
+locally: keyless cosign signing (needs GitHub's OIDC provider), GHCR push,
+and the SARIF upload to the code-scanning API (needs `GITHUB_TOKEN` with
+`security_events` scope) — those steps stay in real CI.
+
 ## Security notes
 
 - Trivy scans run on every PR (filesystem: dependency vulns via `uv.lock` +

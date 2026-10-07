@@ -38,24 +38,41 @@ jobs:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - name: Trivy filesystem scan (vulns from uv.lock + secrets)
+      # Trivy action forces ALL severities into SARIF output regardless of the
+      # severity filter, so reporting and gating are separate invocations:
+      # report every finding to the Security tab, then gate on HIGH/CRITICAL.
+      - name: Trivy filesystem scan (report all severities)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
           scanners: vuln,secret
+          cache: "false" # actions/cache stalls under act and failed in CI; DB is cheap to fetch
           format: sarif
           output: trivy-fs.sarif
-          exit-code: "1"
-          ignore-unfixed: true
-          severity: HIGH,CRITICAL
+          exit-code: "0"
 
       - name: Upload filesystem scan to Security tab
-        if: always()
+        # env.ACT is set by nektos/act for local runs; the code-scanning API
+        # upload needs a real GITHUB_TOKEN, so skip it there.
+        if: ${{ always() && !env.ACT }}
         uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
+
+      - name: Trivy filesystem scan (gate HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          cache: "false"
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          skip-setup-trivy: true
 
   scan-config:
     runs-on: ubuntu-24.04
@@ -67,19 +84,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - name: Trivy misconfiguration scan
+      - name: Trivy misconfiguration scan (report all severities)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
           scan-ref: .
+          cache: "false"
           format: sarif
           output: trivy-config.sarif
-          exit-code: "1"
-          severity: HIGH,CRITICAL
+          exit-code: "0"
 
       - name: Upload config scan to Security tab
-        if: always()
+        if: ${{ always() && !env.ACT }}
         uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
           sarif_file: trivy-config.sarif
           category: trivy-config
+
+      - name: Trivy misconfiguration scan (gate HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          cache: "false"
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          skip-setup-trivy: true

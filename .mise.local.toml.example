@@ -1,0 +1,29 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+#
+# Local, personal configuration. Copy to `.mise.local.toml` (mise auto-loads it
+# after mise.toml; both are git-ignored) and fill in what you need.
+
+[env]
+# --- Docker Hardened Images base (optional) -------------------------------
+# Release CI reads these from repo secrets (DOCKERHUB_USERNAME/DOCKERHUB_TOKEN).
+# Locally they are only needed if you want to build with the dhi.io base:
+#   mise run docker-build-with-dhi   (or: docker build --build-arg BASE_IMAGE=dhi.io/python:3.13 .)
+DOCKERHUB_USERNAME = ""
+DOCKERHUB_TOKEN = ""
+
+# --- Real credentials for doctor / live smoke tests ------------------------
+# Used by `pelocore doctor`, `pelocore sync`, and PELOCORE_LIVE=1 pytest runs.
+PELOTON_USERNAME = ""
+PELOTON_PASSWORD = ""
+PELOTON_REFRESH_TOKEN = ""
+COROS_EMAIL = ""
+COROS_PASSWORD = ""
+COROS_ACCESS_TOKEN = ""
+COROS_REGION = "en"
+
+# Set to "1" to enable live tests: PELOCORE_LIVE=1 mise exec -- uv run pytest -m live
+PELOCORE_LIVE = "0"
+
+[tasks.docker-build-with-dhi]
+description = "Build the container image on the hardened DHI base"
+run = "docker build --build-arg BASE_IMAGE=dhi.io/python:3.13 -t pelocore:dhi ."

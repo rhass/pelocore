@@ -1,0 +1,5 @@
+# act (nektos/act) local GitHub Actions runner configuration.
+# Map our runner label to a local image (default image map lacks ubuntu-24.04);
+# force amd64 since catthehacker images have no arm64 variant (Apple Silicon).
+-P ubuntu-24.04=catthehacker/ubuntu:act-24.04
+--container-architecture linux/amd64

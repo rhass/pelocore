@@ -1,4 +1,7 @@
 .venv/
+.mise.*.toml
+mise.*.toml
+.act/
 __pycache__/
 *.pyc
 .pytest_cache/

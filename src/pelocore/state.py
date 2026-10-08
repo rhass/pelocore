@@ -35,6 +35,7 @@ class WorkoutRecord:
     instructor: str | None = None
     discipline: str | None = None
     start_time: int | None = None  # Peloton epoch seconds
+    converter_version: int | None = None  # FIT converter stamp at upload time
     attempts: int = 1
     last_error: str | None = None
 
@@ -51,6 +52,7 @@ class WorkoutRecord:
             instructor=data.get("instructor"),
             discipline=data.get("discipline"),
             start_time=data.get("start_time"),
+            converter_version=data.get("converter_version"),
             attempts=int(data.get("attempts", 1)),
             last_error=data.get("last_error"),
         )
@@ -91,6 +93,7 @@ class CycleReport:
     trigger: str = "scheduled"  # "scheduled" | "manual" | "cli"
     fetched: int = 0
     uploaded: int = 0
+    upgraded: int = 0
     skipped: int = 0
     failed: int = 0
     errors: list[CycleError] = field(default_factory=list)
@@ -104,6 +107,7 @@ class CycleReport:
             trigger=data.get("trigger", "scheduled"),
             fetched=int(data.get("fetched", 0)),
             uploaded=int(data.get("uploaded", 0)),
+            upgraded=int(data.get("upgraded", 0)),
             skipped=int(data.get("skipped", 0)),
             failed=int(data.get("failed", 0)),
             errors=[CycleError.from_dict(e) for e in data.get("errors", [])],
@@ -112,7 +116,8 @@ class CycleReport:
     def summary_line(self) -> str:
         return (
             f"outcome={self.outcome} fetched={self.fetched} "
-            f"uploaded={self.uploaded} skipped={self.skipped} failed={self.failed}"
+            f"uploaded={self.uploaded} upgraded={self.upgraded} "
+            f"skipped={self.skipped} failed={self.failed}"
         )
 
 
@@ -198,6 +203,7 @@ class StateStore:
         instructor: str | None,
         discipline: str | None,
         start_time: int | None = None,
+        converter_version: int | None = None,
     ) -> WorkoutRecord:
         with self._lock:
             previous = self._workouts.get(workout_id)
@@ -212,6 +218,7 @@ class StateStore:
                 instructor=instructor,
                 discipline=discipline,
                 start_time=start_time,
+                converter_version=converter_version,
                 attempts=(previous.attempts if previous else 0) + 1,
             )
             self._workouts[workout_id] = rec

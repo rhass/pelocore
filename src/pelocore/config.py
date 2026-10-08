@@ -58,9 +58,16 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("PELOCORE_SYNC_INTERVAL_SECONDS", "sync_interval_seconds"),
     )
     import_poll_seconds: float = Field(
-        default=120.0,
+        default=60.0,
         ge=0,
         validation_alias=AliasChoices("PELOCORE_IMPORT_POLL_SECONDS", "import_poll_seconds"),
+    )
+    # Re-upload workouts whose FIT bytes would differ from what was uploaded
+    # (conversion changed). Drift detection is version-stamp based: zero
+    # extra API calls in steady state.
+    auto_upgrade: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("PELOCORE_AUTO_UPGRADE", "auto_upgrade"),
     )
     state_path: Path = Field(
         default=Path("data/state.json"),

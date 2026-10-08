@@ -22,6 +22,8 @@ from typing import Any
 
 from pelocore import status
 from pelocore.config import Settings
+from pelocore.coros import CorosClient
+from pelocore.peloton import PylotonClient
 from pelocore.state import CycleReport, StateStore
 from pelocore.sync import SyncEngine
 
@@ -201,6 +203,8 @@ class BridgeServer:
                     last_success_timestamp=snap.last_success_timestamp,
                     uptime_seconds=time.time() - self._started_at,
                     last_outcome=snap.last_outcome,
+                    peloton_api_calls=PylotonClient.api_calls,
+                    coros_api_calls=CorosClient.api_calls,
                 )
                 return 200, body, "text/plain; version=0.0.4; charset=utf-8"
         return 404, "not found\n", "text/plain; charset=utf-8"

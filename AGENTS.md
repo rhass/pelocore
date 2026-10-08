@@ -114,6 +114,14 @@ docstrings of `coros.py` and `peloton.py`. Non-obvious traps:
   experimentally, `scripts/experiment_subsport.py`). Import-list entries
   are retained for many months, making stateless (no-volume) operation
   safe; a lost state file costs wasted uploads, never duplicates.
+- Conversion drift handling: FIT filenames carry the converter version
+  (`peloton-<id>.fit` = v1, `.v2`+ suffixed); the import list doubles as
+  the version record, so drift detection needs no rebuilds or refetches.
+  `CONVERTER_VERSION` in `fitbuild.py` bumps only with conversion-behavior
+  changes. Sync then deletes the stale activity (unique start+sport match
+  required; ambiguity raises and is skipped, never deleted blind) and
+  re-uploads. `pelocore sync` (cron/serverless) ignores
+  `PELOCORE_SYNC_INTERVAL_SECONDS` - that knob is loop-mode-only.
 - Manufacturer spoofing (file_id manufacturer 294 / product 822, matching
   COROS hardware) does NOT change import categorization; yoga with sub-sport
   still lands as Strength. Primary-sport categorization is a server-side

@@ -32,6 +32,11 @@ MILE_IN_METERS = 1609.344
 
 MAX_PROFILE_NAME_CHARS = 120
 
+#: Bump only when conversion behavior changes. Changing it changes the FIT
+#: bytes, which is what makes COROS's md5-keyed dedupe treat versions as
+#: distinct activities - the basis of automatic upgrade-on-drift.
+CONVERTER_VERSION = 1
+
 
 class FitBuildError(Exception):
     """Raised when a FIT file cannot be built or fails self-validation."""

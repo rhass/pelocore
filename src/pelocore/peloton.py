@@ -9,7 +9,7 @@ from __future__ import annotations
 import dataclasses
 import time
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
 from pylotoncycle import PylotonCycle
 
@@ -278,6 +278,9 @@ def _optional_miles_to_meters(source: dict[str, Any], key: str) -> float | None:
 class PylotonClient:
     """Concrete :class:`PelotonSource` backed by :class:`PylotonCycle`."""
 
+    #: Process-wide count of Peloton API requests; exposed on /metrics.
+    api_calls: ClassVar[int] = 0
+
     def __init__(
         self,
         *,
@@ -303,6 +306,7 @@ class PylotonClient:
         return self._client
 
     def _get_json(self, url: str) -> dict[str, Any]:
+        type(self).api_calls += 1
         response = self._session().s.get(url, timeout=self._timeout)
         response.raise_for_status()
         data: dict[str, Any] = response.json()

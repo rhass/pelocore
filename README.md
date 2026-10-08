@@ -55,7 +55,9 @@ Open http://localhost:8080 for the status page.
 | `PELOCORE_TIMEZONE_QUARTERS` | host offset | COROS timezone in quarter-hours east of UTC (32 = UTC+8) |
 | `PELOCORE_BACKFILL_DAYS` | `7` | How far back to look for unsynced workouts |
 | `PELOCORE_SPORT_REMAPS` | `stretching=yoga` built-in | Discipline remaps, e.g. `meditation=yoga`. COROS has no stretching type and buckets unknown TRAINING files into Strength, so stretching maps to Yoga by default; Pilates has a native mapping |
-| `PELOCORE_SYNC_INTERVAL_SECONDS` | `900` | Loop-mode cycle interval |
+| `PELOCORE_SYNC_INTERVAL_SECONDS` | `900` | Loop-mode cycle interval (ignored by `sync` - cron mode cadence is the scheduler's job) |
+| `PELOCORE_IMPORT_POLL_SECONDS` | `60` | How long to poll COROS import status per upload |
+| `PELOCORE_AUTO_UPGRADE` | `on` | When a conversion change would produce different FIT bytes, delete the stale COROS activity and re-upload automatically (conservative: ambiguous matches are skipped, never deleted blind) |
 | `PELOCORE_IMPORT_POLL_SECONDS` | `120` | How long to poll COROS import status |
 | `PELOCORE_STATE_PATH` | `data/state.json` | State file location |
 | `PELOCORE_SERVER_HOST` / `PELOCORE_SERVER_PORT` | `0.0.0.0` / `8080` | Status server bind |
@@ -104,6 +106,12 @@ until the constants in `src/pelocore/coros.py` are updated.
   second activity (verified experimentally). This is what makes stateless
   operation safe: a lost state file only ever causes wasted uploads, never
   duplicates.
+- **Conversion changes (auto-upgrade)**: FIT filenames carry the converter
+  version (`peloton-<id>.fit` = v1, `peloton-<id>.v2.fit` = v2). The import
+  list reveals which version produced each upload, so when the converter
+  changes, the next sync detects stale versions, deletes the old activity
+  (unique start-time + sport match required), purges the import entry, and
+  re-uploads. No manual backfill needed for data-fidelity fixes.
 - **Query scoping**: `activity/query` must be scoped with
   `startDay`/`endDay`; unbounded queries can return stale partial results
   (which once made fresh imports invisible). pelocore scopes everything.
@@ -158,10 +166,18 @@ create a duplicate activity. The shipped `cronjob.yaml` mounts no volume
 and every run starts from scratch.
 
 - **k8s CronJob**: the default stateless shape (`deploy/k8s/cronjob.yaml`).
+  The schedule is the citizen knob: it sets how often Peloton and COROS get
+  polled (an idle run costs ~3 light reads). The shipped default is `*/15`;
+  relax it to lower API traffic.
 - **Serverless** (Cloud Run Jobs, etc.): works the same way; tune
   `PELOCORE_IMPORT_POLL_SECONDS` down if per-invocation time is capped,
   since polling (import + rename resolution) dominates runtime. AWS Lambda's
-  15-minute cap fits small backfills only.
+  15-minute cap fits small backfills only. Note `pelocore sync` is one-shot
+  and ignores `PELOCORE_SYNC_INTERVAL_SECONDS` entirely - that setting only
+  applies to `pelocore run`.
+- **API observability**: `/metrics` reports
+  `pelocore_peloton_api_calls_total` and
+  `pelocor_coros_api_calls_total` so the request budget stays visible.
 - **Deployment with status page**: state.json adds cycle history for the
   status page and skips already-known workouts (fewer API calls), but is
   never required for correctness.

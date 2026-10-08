@@ -24,7 +24,7 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import quote
 
 import requests
@@ -82,6 +82,10 @@ class CorosAuthError(CorosError):
 
 class CorosHttpError(CorosError):
     """Non-JSON or otherwise malformed HTTP response."""
+
+
+class CorosAmbiguousMatchError(CorosError):
+    """More than one activity matched a start-time window; refusing to act."""
 
 
 class CorosApiError(CorosError):
@@ -236,6 +240,11 @@ def sigv4_authorization(
 
 
 class CorosClient:
+    #: Process-wide count of requests made to COROS hosts (API + STS + S3
+    #: + import registration); exposed on the status /metrics endpoint so
+    #: the API budget stays observable.
+    api_calls: ClassVar[int] = 0
+
     def __init__(
         self,
         *,
@@ -281,6 +290,7 @@ class CorosClient:
             "accountType": 2,
             "pwd": password_md5(self._password),
         }
+        type(self).api_calls += 1
         try:
             response = self._http.post(
                 self.base_url + "/account/login",
@@ -344,6 +354,7 @@ class CorosClient:
         headers = {"Content-Type": "application/json"}
         if authenticate:
             headers[token_header] = self.ensure_auth()
+        type(self).api_calls += 1
         try:
             response = self._http.request(
                 method, url, headers=headers, json=json_body, params=params, timeout=self._timeout
@@ -367,6 +378,7 @@ class CorosClient:
             f"{STS_PROXY[self._region]}/api/proxy/oss/sts"
             f"?bucket={STS_BUCKET[self._region]}&service={STS_SERVICE[self._region]}&v=2"
         )
+        type(self).api_calls += 1
         try:
             response = self._http.get(
                 proxy_url,
@@ -392,6 +404,7 @@ class CorosClient:
             "sign": STS_SIGN[self._region],
         }
         legacy_url = FAQ_API_URL + "/openapi/oss/sts"
+        type(self).api_calls += 1
         try:
             response = self._http.get(legacy_url, params=params, timeout=self._timeout)
             creds = _parse_sts_response(response, legacy_url)
@@ -425,6 +438,7 @@ class CorosClient:
         }
         if creds.session_token:
             headers["x-amz-security-token"] = creds.session_token
+        type(self).api_calls += 1
         try:
             response = self._http.put(url, headers=headers, data=body, timeout=self._timeout)
         except requests.RequestException as exc:
@@ -455,6 +469,7 @@ class CorosClient:
             "oriFileName": filename,
         }
         url = self.base_url + "/activity/fit/import"
+        type(self).api_calls += 1
         try:
             response = self._http.post(
                 url,
@@ -519,6 +534,69 @@ class CorosClient:
 
     def imported_filenames(self) -> set[str]:
         return {job.original_filename for job in self.import_jobs() if job.original_filename}
+
+    def imported_versions(self, size: int = 100) -> dict[str, int]:
+        """workout_id -> highest version present in the import list.
+
+        Filenames look like ``peloton-<id>.fit`` (version 1) or
+        ``peloton-<id>.v<n>.fit`` (later converter versions). This is the
+        stateless drift-detection source: version info arrives in the
+        import-list read the sync already performs.
+        """
+        out: dict[str, int] = {}
+        for job in self.import_jobs(size=size):
+            name = job.original_filename or ""
+            if not name.startswith("peloton-") or not name.endswith(".fit"):
+                continue
+            stem = name[len("peloton-") : -len(".fit")]
+            workout_id, _, version = stem.partition(".v")
+            version_num = int(version) if version.isdigit() else 1
+            if workout_id and version_num > out.get(workout_id, 0):
+                out[workout_id] = version_num
+        return out
+
+    def find_activity(
+        self, start_time: int, sport_hint: int | None = None
+    ) -> ActivityItem | None:
+        """The unique activity within +/-60s of ``start_time``.
+
+        Sport-hinted matches take precedence; a single unambiguous time-only
+        match is accepted (the importer may file files under an unexpected
+        sport). None when there is no match; ambiguity logs a warning and
+        returns None - callers must never act on an ambiguous window.
+        """
+        hinted: dict[str, ActivityItem] = {}
+        time_only: dict[str, ActivityItem] = {}
+        window_day = datetime.fromtimestamp(start_time, tz=UTC)
+        start_day = (window_day - timedelta(days=1)).strftime("%Y%m%d")
+        end_day = (window_day + timedelta(days=1)).strftime("%Y%m%d")
+        for page in (1, 2):
+            try:
+                activities = self.list_activities(
+                    page=page, size=50, start_day=start_day, end_day=end_day
+                )
+            except CorosError as exc:
+                logger.debug("activity query failed: %s", exc)
+                continue
+            for item in activities:
+                if abs(item.start_time - start_time) > 60:
+                    continue
+                time_only[item.label_id] = item
+                if sport_hint is not None and item.sport_type == sport_hint:
+                    hinted[item.label_id] = item
+        target_group = hinted or time_only
+        if len(target_group) == 1:
+            return next(iter(target_group.values()))
+        if len(target_group) > 1:
+            logger.warning(
+                "ambiguous activity window for start_time=%s (%d candidates)",
+                start_time,
+                len(target_group),
+            )
+            raise CorosAmbiguousMatchError(
+                f"{len(target_group)} activities within 60s of {start_time}"
+            )
+        return None
 
     def list_activities(
         self,
@@ -601,6 +679,7 @@ class CorosClient:
             "accesstoken": self._token or "",
             "yfheader": json.dumps({"userId": account.user_id, "language": "en-US"}),
         }
+        type(self).api_calls += 1
         try:
             response = self._http.post(
                 self.base_url + "/activity/update",
@@ -618,53 +697,25 @@ class CorosClient:
         sport_hint: int | None,
         name: str,
         *,
-        timeout_s: float = 90.0,
+        timeout_s: float = 45.0,
         interval_s: float = 10.0,
     ) -> bool:
         """Resolve the labelId for a just-imported activity and rename it.
 
         COROS assigns the labelId while it processes the import, so poll
-        ``activity/query`` until a unique candidate appears within +/-60s of
-        ``start_time``. When ``sport_hint`` is given only activities with
-        that sportType count; otherwise a single unambiguous time match is
-        required (the importer may file files under an unexpected sport).
-        Returns True when renamed.
+        ``activity/query`` (via :meth:`find_activity`, which requires a
+        unique match) until found or the deadline passes. Returns True when
+        renamed.
         """
         deadline = time.monotonic() + timeout_s
         while True:
-            hinted: dict[str, ActivityItem] = {}
-            time_only: dict[str, ActivityItem] = {}
-            window_day = datetime.fromtimestamp(start_time, tz=UTC)
-            start_day = (window_day - timedelta(days=1)).strftime("%Y%m%d")
-            end_day = (window_day + timedelta(days=1)).strftime("%Y%m%d")
-            for page in (1, 2):
-                try:
-                    activities = self.list_activities(
-                        page=page, size=50, start_day=start_day, end_day=end_day
-                    )
-                except CorosError as exc:
-                    logger.debug("activity query failed during rename: %s", exc)
-                    continue
-                for item in activities:
-                    if abs(item.start_time - start_time) > 60:
-                        continue
-                    time_only[item.label_id] = item
-                    if sport_hint is not None and item.sport_type == sport_hint:
-                        hinted[item.label_id] = item
-            # Prefer a sport-hinted match; fall back to a unique time-only
-            # match (the importer may file files under an unexpected sport).
-            target_group = hinted or time_only
-            if len(target_group) == 1:
-                item = next(iter(target_group.values()))
+            try:
+                item = self.find_activity(start_time, sport_hint)
+            except CorosAmbiguousMatchError:
+                return False  # ambiguous: never guess
+            if item is not None:
                 self.rename_activity(item.label_id, name)
                 return True
-            if len(target_group) > 1:
-                logger.warning(
-                    "ambiguous rename target for start_time=%s (%d candidates); skipping",
-                    start_time,
-                    len(target_group),
-                )
-                return False
             if time.monotonic() >= deadline:
                 return False
             time.sleep(interval_s)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from pelocore.config import Settings
 from pelocore.coros import UploadResult
 from pelocore.peloton import WorkoutPerformance
@@ -205,3 +207,164 @@ def test_rename_failure_does_not_fail_cycle(
     engine = SyncEngine(peloton, RenamingCoros(), store, settings)
     report = engine.run_cycle()
     assert report.outcome == "ok" and report.uploaded == 1
+
+
+def _upgrade_setup(
+    store: StateStore,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    state_version: int | None,
+    imported: set[str],
+) -> tuple[SyncEngine, FakeCoros]:
+    """Shared scaffolding: stale record + mocked CONVERTER_VERSION=2."""
+    import pelocore.sync as sync_mod
+    from pelocore.coros import ActivityItem
+
+    monkeypatch.setattr(sync_mod, "CONVERTER_VERSION", 2)
+    peloton = FakePeloton(workouts=[make_workout("w1")], performances={"w1": cycling_performance()})
+    coros = FakeCoros(imported=imported)
+    store.record_uploaded(
+        "w1",
+        md5="old",
+        import_id="j",
+        fit_filename=fit_filename("w1"),
+        title="Power Zone Ride",
+        instructor="Denis Morton",
+        discipline="cycling",
+        start_time=1_700_000_000,
+        converter_version=state_version,
+    )
+    coros.activities.append(
+        ActivityItem(label_id="L1", sport_type=201, start_time=1_700_000_000)
+    )
+    engine = build_engine(peloton, coros, store, settings)
+    return engine, coros
+
+
+def test_state_version_drift_upgrades(
+    store: StateStore, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine, coros = _upgrade_setup(store, settings, monkeypatch, state_version=1, imported=set())
+    report = engine.run_cycle()
+    assert report.upgraded == 1
+    assert report.uploaded == 1
+    assert coros.deleted == ["L1"]
+    upgraded_record = store.get("w1")
+    assert upgraded_record is not None
+    assert upgraded_record.converter_version == 2
+
+
+def test_import_list_version_drift_upgrades_stateless(
+    store: StateStore, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine, coros = _upgrade_setup(
+        store, settings, monkeypatch,
+        state_version=None, imported={"peloton-w1.v1.fit"},
+    )
+    store.workouts_remove("w1")  # fully stateless: no local record
+    report = engine.run_cycle()
+    assert report.upgraded == 1 and report.uploaded == 1
+    assert coros.deleted == ["L1"]
+    upgraded_record = store.get("w1")
+    assert upgraded_record is not None
+    assert upgraded_record.converter_version == 2
+
+
+def test_rollout_rule_unsuffixed_filename_is_v1(
+    store: StateStore, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine, _coros = _upgrade_setup(
+        store, settings, monkeypatch,
+        state_version=None, imported={"peloton-w1.fit"},
+    )
+    store.workouts_remove("w1")
+    report = engine.run_cycle()
+    assert report.upgraded == 1  # unsuffixed counts as version 1 < 2
+
+
+def test_current_version_skips(
+    store: StateStore, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine, coros = _upgrade_setup(store, settings, monkeypatch, state_version=2, imported=set())
+    report = engine.run_cycle()
+    assert report.upgraded == 0 and report.uploaded == 0
+    assert report.skipped == 1
+    assert coros.deleted == []
+
+
+def test_auto_upgrade_disabled_keeps_stale(
+    store: StateStore, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = settings.model_copy(update={"auto_upgrade": False})
+    engine, coros = _upgrade_setup(store, settings, monkeypatch, state_version=1, imported=set())
+    report = engine.run_cycle()
+    assert report.upgraded == 0 and report.uploaded == 0
+    assert report.skipped == 1
+    assert coros.deleted == []
+
+
+def test_ambiguous_old_activity_blocks_upgrade(
+    store: StateStore, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pelocore.coros import ActivityItem
+
+    engine, coros = _upgrade_setup(store, settings, monkeypatch, state_version=1, imported=set())
+    coros.activities.append(
+        ActivityItem(label_id="L2", sport_type=201, start_time=1_700_000_030)
+    )
+    report = engine.run_cycle()
+    assert report.upgraded == 0 and report.uploaded == 0
+    assert coros.deleted == []  # never delete blind
+    assert any("ambiguous" in e.error for e in report.errors)
+    assert report.skipped == 1
+
+
+def test_upgrade_purges_stale_import_entries(
+    store: StateStore, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pelocore.sync as sync_mod
+    from pelocore.coros import ActivityItem, ImportJob
+
+    monkeypatch.setattr(sync_mod, "CONVERTER_VERSION", 2)
+    store.record_uploaded(
+        "w1",
+        md5="old",
+        import_id="j",
+        fit_filename=fit_filename("w1"),
+        title="Power Zone Ride",
+        instructor="Denis Morton",
+        discipline="cycling",
+        start_time=1_700_000_000,
+        converter_version=1,
+    )
+
+    class PurgeableCoros(FakeCoros):
+        purged: list[str]
+
+        def __init__(self, *args: object, **kwargs: object):
+            super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+            self.purged = []
+
+        def import_jobs(self, size: int = 50) -> list[ImportJob]:
+            return [
+                ImportJob(id="old-1", status=2, original_filename="peloton-w1.fit"),
+                ImportJob(id="other", status=2, original_filename="peloton-w2.fit"),
+            ]
+
+        def remove_from_import_list(self, import_id: str) -> None:
+            self.purged.append(import_id)
+
+    coros = PurgeableCoros()
+    coros.activities.append(
+        ActivityItem(label_id="L1", sport_type=201, start_time=1_700_000_000)
+    )
+    peloton = FakePeloton(
+        workouts=[make_workout("w1")], performances={"w1": cycling_performance()}
+    )
+    engine = SyncEngine(peloton, coros, store, settings)
+    report = engine.run_cycle()
+
+    assert report.upgraded == 1
+    assert coros.purged == ["old-1"]  # stale entry purged, unrelated kept
+    assert coros.deleted == ["L1"]

@@ -10,7 +10,9 @@ metadata:
   labels:
     app.kubernetes.io/name: pelocore
 spec:
-  # Every 15 minutes.
+  # Every 15 minutes. Stateless mode polls Peloton + COROS each run
+  # (an idle run costs ~3 light reads); this schedule is the API-traffic
+  # knob - relax it (e.g. hourly) to be even lighter.
   schedule: "*/15 * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3

@@ -44,6 +44,7 @@ def _cycle_dict(report: CycleReport) -> dict[str, Any]:
         "trigger": report.trigger,
         "fetched": report.fetched,
         "uploaded": report.uploaded,
+        "upgraded": report.upgraded,
         "skipped": report.skipped,
         "failed": report.failed,
         "errors": [
@@ -87,6 +88,7 @@ def render_html(payload: dict[str, Any]) -> str:
             f"{esc(str(cycle['outcome']))}</span></td>"
             f"<td>{esc(str(cycle['trigger']))}</td>"
             f"<td>{cycle['fetched']}</td><td>{cycle['uploaded']}</td>"
+            f"<td>{cycle.get('upgraded', 0)}</td>"
             f"<td>{cycle['skipped']}</td><td>{cycle['failed']}</td>"
             "</tr>"
         )
@@ -133,8 +135,8 @@ state: {counts.get("synced", 0)} synced, {counts.get("failed", 0)} failed</p>
 <p><span class="badge {badge_class}">{esc(outcome)}</span>
 {esc(_summary(last))}</p>
 <h2>Recent cycles</h2>
-<table><tr><th>started</th><th>outcome</th><th>trigger</th><th>fetched</th><th>uploaded</th><th>skipped</th><th>failed</th></tr>
-{''.join(rows) or '<tr><td colspan="7">no cycles yet</td></tr>'}</table>
+<table><tr><th>started</th><th>outcome</th><th>trigger</th><th>fetched</th><th>uploaded</th><th>upgraded</th><th>skipped</th><th>failed</th></tr>
+{''.join(rows) or '<tr><td colspan="8">no cycles yet</td></tr>'}</table>
 <h2>Errors (last cycle)</h2>
 <table><tr><th>workout</th><th>title</th><th>instructor</th><th>discipline</th><th>source</th><th>error</th></tr>
 {''.join(error_rows) or '<tr><td colspan="6">no errors</td></tr>'}</table>
@@ -150,6 +152,7 @@ def _summary(last: dict[str, Any] | None) -> str:
         return "no sync has run yet"
     return (
         f"fetched {last['fetched']}, uploaded {last['uploaded']}, "
+        f"upgraded {last.get('upgraded', 0)}, "
         f"skipped {last['skipped']}, failed {last['failed']}"
     )
 
@@ -162,6 +165,8 @@ def render_metrics(
     last_success_timestamp: float | None,
     uptime_seconds: float,
     last_outcome: str | None,
+    peloton_api_calls: int = 0,
+    coros_api_calls: int = 0,
 ) -> str:
     lines = [
         "# HELP pelocore_sync_cycles_total Number of sync cycles attempted.",
@@ -181,6 +186,12 @@ def render_metrics(
         "# HELP pelocore_uptime_seconds Server uptime in seconds.",
         "# TYPE pelocore_uptime_seconds gauge",
         f"pelocore_uptime_seconds {uptime_seconds:.0f}",
+        "# HELP pelocore_peloton_api_calls_total Peloton API requests since process start.",
+        "# TYPE pelocore_peloton_api_calls_total counter",
+        f"pelocore_peloton_api_calls_total {peloton_api_calls}",
+        "# HELP pelocore_coros_api_calls_total COROS API/storage requests since process start.",
+        "# TYPE pelocore_coros_api_calls_total counter",
+        f"pelocore_coros_api_calls_total {coros_api_calls}",
         "# HELP pelocore_last_cycle_outcome Outcome of the last cycle (1 for matching label).",
         "# TYPE pelocore_last_cycle_outcome gauge",
     ]

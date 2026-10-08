@@ -5,11 +5,12 @@ from __future__ import annotations
 import hashlib
 import pathlib
 import threading
+from typing import Any
 
 import pytest
 
 from pelocore.config import Settings
-from pelocore.coros import ActivityItem, UploadResult
+from pelocore.coros import ActivityItem, CorosAmbiguousMatchError, UploadResult
 from pelocore.peloton import (
     ExerciseBlock,
     PelotonWorkout,
@@ -81,6 +82,7 @@ class FakeCoros:
         self.uploads: list[tuple[bytes, str]] = []
         self.polls: list[tuple[str, float]] = []
         self.renames: list[tuple[int, int | None, str]] = []
+        self.purged: list[str] = []
 
     def all_activities(self) -> list[ActivityItem]:
         return list(self.activities)
@@ -89,8 +91,35 @@ class FakeCoros:
         self.deleted.append(label_id)
         self.activities = [a for a in self.activities if a.label_id != label_id]
 
+    def find_activity(
+        self, start_time: int, sport_hint: int | None = None
+    ) -> ActivityItem | None:
+        matches = [a for a in self.activities if abs(a.start_time - start_time) <= 60]
+        if len(matches) > 1:
+            raise CorosAmbiguousMatchError(f"{len(matches)} candidates")
+        return matches[0] if matches else None
+
     def imported_filenames(self) -> set[str]:
         return set(self.imported)
+
+    def import_jobs(self, size: int = 50) -> list[Any]:
+        return []
+
+    def remove_from_import_list(self, import_id: str) -> None:
+        self.purged.append(import_id)
+
+    def imported_versions(self, size: int = 100) -> dict[str, int]:
+        """workout_id -> version, derived from the imported filenames."""
+        out: dict[str, int] = {}
+        for filename in self.imported:
+            if not filename.startswith("peloton-") or not filename.endswith(".fit"):
+                continue
+            stem = filename[len("peloton-") : -4]
+            workout_id, _, version = stem.partition(".v")
+            version_num = int(version) if version.isdigit() else 1
+            if workout_id and version_num > out.get(workout_id, 0):
+                out[workout_id] = version_num
+        return out
 
     def upload_fit(self, fit_bytes: bytes, filename: str) -> UploadResult:
         if self.upload_error:

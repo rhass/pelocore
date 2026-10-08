@@ -106,3 +106,31 @@ def test_json_render(store: StateStore) -> None:
     parsed = json.loads(status.render_json(payload))
     assert parsed["sync_running"] is True
     assert parsed["next_sync_in_seconds"] == 5
+
+
+def test_metrics_api_call_counters() -> None:
+    body = status.render_metrics(
+        cycles_total=1,
+        uploaded_total=1,
+        failed_total=0,
+        last_success_timestamp=1.0,
+        uptime_seconds=2.0,
+        last_outcome="ok",
+        peloton_api_calls=42,
+        coros_api_calls=7,
+    )
+    assert "pelocore_peloton_api_calls_total 42" in body
+    assert "pelocore_coros_api_calls_total 7" in body
+
+
+def test_payload_includes_upgraded(store: StateStore) -> None:
+    store.record_uploaded("w1", md5="m", import_id="j", fit_filename="f",
+                          title="Ride", instructor="Coach", discipline="cycling")
+    store.append_cycle(CycleReport(started_at="t", outcome="ok", uploaded=1, upgraded=1))
+    payload = status.build_payload(
+        version="0.1.0", store=store, uptime_seconds=1,
+        next_sync_in_seconds=None, sync_running=False,
+    )
+    assert payload["last_cycle"]["upgraded"] == 1
+    html = status.render_html(payload)
+    assert "upgraded" in html

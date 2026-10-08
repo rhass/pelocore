@@ -15,6 +15,7 @@ import os
 import signal
 import sys
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 from pelocore import __version__
 from pelocore.config import Settings
@@ -49,6 +50,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     sync_parser.add_argument(
         "--force", action="store_true", help="upload even if state/COROS says it is synced"
     )
+    sync_parser.add_argument(
+        "--since", metavar="YYYY-MM-DD",
+        help="backfill all workouts from this date (overrides the backfill window)",
+    )
+    sync_parser.add_argument(
+        "--chunk-size", type=int, default=0, metavar="N",
+        help="pause after every N uploads during a backfill (0 = no pacing)",
+    )
+    sync_parser.add_argument(
+        "--chunk-delay", type=float, default=0.0, metavar="S",
+        help="seconds to pause between chunks (requires --chunk-size)",
+    )
+    sync_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="list the sync plan (new/skip/upgrade) without uploading or refetching",
+    )
 
     subparsers.add_parser("run", help="run the loop server with the status page")
     subparsers.add_parser("status", help="print recent sync history from the state file")
@@ -73,7 +90,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     if args.command == "sync":
-        return _cmd_sync(settings, args.workout_id, force=args.force)
+        return _cmd_sync(
+            settings,
+            workout_id=args.workout_id,
+            force=args.force,
+            since=args.since,
+            chunk_size=args.chunk_size,
+            chunk_delay=args.chunk_delay,
+            dry_run=args.dry_run,
+        )
     if args.command == "run":
         return _cmd_run(settings)
     if args.command == "status":
@@ -115,12 +140,34 @@ def build_engine(settings: Settings) -> tuple[SyncEngine, StateStore]:
     return SyncEngine(peloton, coros, store, settings), store
 
 
-def _cmd_sync(settings: Settings, workout_id: str | None = None, *, force: bool = False) -> int:
+def _cmd_sync(
+    settings: Settings,
+    workout_id: str | None = None,
+    *,
+    force: bool = False,
+    since: str | None = None,
+    chunk_size: int = 0,
+    chunk_delay: float = 0.0,
+    dry_run: bool = False,
+) -> int:
+    if since is not None:
+        try:
+            since_date = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=UTC)
+        except ValueError:
+            print(f"invalid --since date: {since!r} (expected YYYY-MM-DD)", file=sys.stderr)
+            return EXIT_FAILED
+        days = max(1, min(365, (datetime.now(UTC) - since_date).days + 1))
+        settings = settings.model_copy(update={"backfill_days": days})
+        print(f"backfill window: since {since} ({days} days)")
+    if chunk_size or chunk_delay:
+        settings = settings.model_copy(
+            update={"upload_chunk_size": chunk_size, "upload_chunk_delay_seconds": chunk_delay}
+        )
     engine, _store = build_engine(settings)
     if workout_id:
         report = engine.sync_workout_by_id(workout_id, force=force)
     else:
-        report = engine.run_cycle(trigger="cli")
+        report = engine.run_cycle(trigger="cli", dry_run=dry_run)
     print(report.summary_line())
     for error in report.errors:
         print(f"  error: {error.workout_id or 'cycle'}: {error.error}", file=sys.stderr)

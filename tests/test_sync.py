@@ -368,3 +368,86 @@ def test_upgrade_purges_stale_import_entries(
     assert report.upgraded == 1
     assert coros.purged == ["old-1"]  # stale entry purged, unrelated kept
     assert coros.deleted == ["L1"]
+
+
+def test_dry_run_lists_plan_without_api_fanout(
+    store: StateStore, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    peloton = FakePeloton(
+        workouts=[make_workout("w1"), make_workout("w2")],
+        performances={"w1": cycling_performance(), "w2": cycling_performance()},
+    )
+    coros = FakeCoros()
+    engine = SyncEngine(peloton, coros, store, settings)
+
+    def _explode(*args: object, **kwargs: object) -> None:
+        raise AssertionError("dry run must not hydrate or upload")
+
+    monkeypatch.setattr(engine, "_hydrate", _explode)
+
+    report = engine.run_cycle(trigger="cli", dry_run=True)
+    assert report.outcome == "ok"
+    assert report.fetched == 2
+    assert report.skipped == 0 and report.uploaded == 0
+    assert coros.uploads == []
+
+
+def test_backfill_orders_oldest_first(
+    store: StateStore, settings: Settings
+) -> None:
+    newer = make_workout("newer")
+    older = make_workout("older")
+    object.__setattr__(newer, "start_time", 1_700_100_000)
+    object.__setattr__(older, "start_time", 1_700_000_000)
+    uploads: list[str] = []
+
+    class OrderedCoros(FakeCoros):
+        def upload_fit(self, fit_bytes: bytes, filename: str) -> UploadResult:
+            uploads.append(filename)
+            return super().upload_fit(fit_bytes, filename)
+
+    peloton = FakePeloton(
+        workouts=[newer, older],
+        performances={"newer": cycling_performance(), "older": cycling_performance()},
+    )
+    SyncEngine(peloton, OrderedCoros(), store, settings).run_cycle()
+    older_index = next(i for i, f in enumerate(uploads) if "older" in f)
+    newer_index = next(i for i, f in enumerate(uploads) if "newer" in f)
+    assert older_index < newer_index
+
+
+def test_chunk_pacing_sleeps_between_chunks(
+    store: StateStore, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pelocore.sync as sync_mod
+
+    settings = settings.model_copy(
+        update={"upload_chunk_size": 2, "upload_chunk_delay_seconds": 7.0}
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr(sync_mod.time, "sleep", lambda s: sleeps.append(s))  # type: ignore[attr-defined]
+
+    peloton = FakePeloton(
+        workouts=[make_workout(f"w{i}") for i in range(5)],
+        performances={f"w{i}": cycling_performance() for i in range(5)},
+    )
+    coros = FakeCoros()
+    report = SyncEngine(peloton, coros, store, settings).run_cycle()
+
+    assert report.uploaded == 5
+    assert sleeps == [7.0, 7.0]  # after chunk 1 and 2; not after the last chunk
+
+
+def test_no_pacing_by_default(
+    store: StateStore, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pelocore.sync as sync_mod
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(sync_mod.time, "sleep", lambda s: sleeps.append(s))  # type: ignore[attr-defined]
+    peloton = FakePeloton(
+        workouts=[make_workout("w1"), make_workout("w2")],
+        performances={"w1": cycling_performance(), "w2": cycling_performance()},
+    )
+    SyncEngine(peloton, FakeCoros(), store, settings).run_cycle()
+    assert sleeps == []

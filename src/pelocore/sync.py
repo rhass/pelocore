@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -108,7 +109,7 @@ class SyncEngine:
         self._finish(report)
         return report
 
-    def run_cycle(self, *, trigger: str = "scheduled") -> CycleReport:
+    def run_cycle(self, *, trigger: str = "scheduled", dry_run: bool = False) -> CycleReport:
         report = CycleReport(started_at=_now_iso(), trigger=trigger)
         try:
             workouts = self._peloton.workouts_since(self._settings.backfill_days)
@@ -147,6 +148,19 @@ class SyncEngine:
             else:
                 actions.append((decision, workout, recorded))
 
+        if dry_run:
+            actions.sort(key=lambda item: item[1].start_time)
+            for decision, workout, _recorded in actions:
+                logger.info(
+                    "dry-run: %s -> %s (%s)",
+                    workout.id,
+                    decision,
+                    display_name(workout.title, workout.instructor),
+                )
+            report.outcome = "ok"
+            self._finish(report)
+            return report
+
         # Phase 1: hydrate everything from Peloton first - fetch performance
         # data and build the FIT files before touching COROS, so Peloton-side
         # failures never leave a half-synced batch.
@@ -155,14 +169,33 @@ class SyncEngine:
             built = self._hydrate(workout, report)
             if built is not None:
                 hydrated.append((decision, workout, built.data, recorded))
+        hydrated.sort(key=lambda item: item[1].start_time)  # oldest first
 
-        # Phase 2: upload the fully hydrated batch to COROS.
-        for decision, workout, fit_bytes, recorded in hydrated:
+        # Phase 2: upload the fully hydrated batch to COROS, in chunks with
+        # delays between them (backfill pacing; off by default).
+        chunk_size = self._settings.upload_chunk_size
+        chunk_delay = self._settings.upload_chunk_delay_seconds
+        uploaded_in_chunk = 0
+        for index, (decision, workout, fit_bytes, recorded) in enumerate(hydrated):
             if decision == "upgrade":
                 if not self._upgrade(workout, recorded, report):
                     continue
                 report.upgraded += 1
             self._upload(workout, fit_bytes, report)
+            uploaded_in_chunk += 1
+            if (
+                chunk_size > 0
+                and chunk_delay > 0
+                and uploaded_in_chunk >= chunk_size
+                and index < len(hydrated) - 1
+            ):
+                logger.info(
+                    "chunk complete (%d uploads); pausing %.0fs before next chunk",
+                    uploaded_in_chunk,
+                    chunk_delay,
+                )
+                time.sleep(chunk_delay)
+                uploaded_in_chunk = 0
 
         if report.failed == 0:
             report.outcome = "ok"

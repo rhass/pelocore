@@ -157,6 +157,26 @@ cycling/running their full HR metrics).
 - Peloton `muscle_group_score` (per-muscle percentages) is available in the
   API but has no standard FIT representation; it is not written today.
 
+## Backfilling history
+
+```console
+$ pelocore sync --since 2026-02-01 --chunk-size 10 --chunk-delay 30
+```
+
+- `--since YYYY-MM-DD` overrides the 7-day window (365-day cap); Peloton's
+  history pagination supports up to 1000 workouts.
+- `--chunk-size` / `--chunk-delay` pace the upload: after every N uploads the
+  bridge pauses S seconds, keeping the request rate gentle on both APIs.
+  Workouts upload oldest-first, so an interrupted run leaves the most recent
+  ones for last.
+- Backfills are resumable: state + the COROS import list dedupe every
+  workout, so re-running skips what already landed (and even a full state
+  loss cannot create duplicates, since the import pipeline is md5-keyed).
+- `--dry-run` prints the plan (new/skip per workout) without uploading or
+  re-fetching performance data.
+- A 280-workout backfill (~8 months) takes roughly 45-70 minutes including
+  chunk delays; per-workout failures are logged and retried on the next run.
+
 ## Stateless operation
 
 `pelocore sync` (cron mode) needs no state at all: dedupe runs against the

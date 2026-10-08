@@ -69,6 +69,21 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("PELOCORE_AUTO_UPGRADE", "auto_upgrade"),
     )
+    # Backfill pacing: after every upload_chunk_size uploads, sleep
+    # upload_chunk_delay_seconds before the next chunk. 0 disables pacing
+    # (loop mode: only a few uploads per cycle anyway).
+    upload_chunk_size: int = Field(
+        default=0,
+        ge=0,
+        validation_alias=AliasChoices("PELOCORE_UPLOAD_CHUNK_SIZE", "upload_chunk_size"),
+    )
+    upload_chunk_delay_seconds: float = Field(
+        default=0.0,
+        ge=0,
+        validation_alias=AliasChoices(
+            "PELOCORE_UPLOAD_CHUNK_DELAY_SECONDS", "upload_chunk_delay_seconds"
+        ),
+    )
     state_path: Path = Field(
         default=Path("data/state.json"),
         validation_alias=AliasChoices("PELOCORE_STATE_PATH", "state_path"),

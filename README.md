@@ -37,7 +37,8 @@ $ export COROS_EMAIL=you@example.com
 $ export COROS_PASSWORD='...'
 $ mise exec -- pelocore doctor     # validates both sides
 $ mise exec -- pelocore sync       # one-shot sync
-$ mise run run                     # loop mode + status page on :8080
+$ mise run start                   # loop mode; `start` wraps with `op run --` when
+                                   # 1Password is configured (see Secrets via 1Password)
 ```
 
 Open http://localhost:8080 for the status page.

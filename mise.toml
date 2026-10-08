@@ -17,9 +17,9 @@ description = "Install dependencies"
 alias = "i"
 run = "uv sync --all-groups"
 
-[tasks.run]
+[tasks.start]
 description = "Run the bridge (loop mode with status server)"
-run = "uv run pelocore run"
+run = "op run -- uv run pelocore run"
 
 [tasks.test]
 description = "Run tests"

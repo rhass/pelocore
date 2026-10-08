@@ -93,7 +93,7 @@ def main() -> int:
     deleted = 0
     for workout_id, rec, match, reason in plan:
         if match is None:
-            print(f"  NO MATCH  {workout_id} ({rec.title}) — {reason}")
+            print(f"  NO MATCH  {workout_id} ({rec.title}) - {reason}")
             continue
         print(
             f"  MATCH     {workout_id} ({rec.title}) -> labelId={match.label_id} "
@@ -106,7 +106,7 @@ def main() -> int:
 
     if args.yes:
         store.save()
-        # Clear stale import-list entries too — reconcile matches on
+        # Clear stale import-list entries too - reconcile matches on
         # originalFilename and would otherwise skip the re-upload.
         removed = 0
         for job in coros.import_jobs(size=50):
@@ -122,7 +122,7 @@ def main() -> int:
         print(f"deleted {deleted} activities; state cleared for them")
         print("now run: pelocore sync   (re-uploads with corrected FIT files)")
     else:
-        print("dry run — pass --yes to delete")
+        print("dry run - pass --yes to delete")
     return 0
 
 

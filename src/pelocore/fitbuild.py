@@ -2,7 +2,7 @@
 
 Produces a complete Activity file: ``file_id``, timer start event, per-second
 ``record`` messages (or GPS points for outdoor workouts), one ``lap``,
-timer stop event, a ``session`` and an ``activity`` message — the shape the
+timer stop event, a ``session`` and an ``activity`` message - the shape the
 FIT SDK sample files use (session/lap carry ``event=LAP, event_type=STOP``).
 """
 
@@ -400,7 +400,7 @@ def _add_strength_structure(
         title = ExerciseTitleMessage()
         title.message_index = index
         # fit_tool types exercise_name as a uint16 table index; the string
-        # field is workout_step_name — COROS/Garmin readers use the string.
+        # field is workout_step_name - COROS/Garmin readers use the string.
         title.workout_step_name = block.name
         builder.add(title)
 

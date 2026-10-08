@@ -118,7 +118,7 @@ def parse_performance(pg: dict[str, Any]) -> WorkoutPerformance:
 def _parse_summaries(summaries: list[Any]) -> PerformanceSummary | None:
     """Extract totals from the ``summaries`` block.
 
-    For cycling this is the only source of distance — Peloton does not emit a
+    For cycling this is the only source of distance - Peloton does not emit a
     per-second distance series for rides.
     """
     distance: float | None = None
@@ -346,7 +346,7 @@ class PylotonClient:
     def class_plan(self, ride_id: str) -> list[ExerciseBlock]:
         """Per-exercise blocks from the strength class plan.
 
-        The plan carries names, durations and muscle groups for each block —
+        The plan carries names, durations and muscle groups for each block -
         the performed workout itself has no per-second data.
         """
         try:

@@ -1,7 +1,7 @@
 # pelocore
 
 Peloton → COROS activity bridge. Fetches your Peloton workouts, converts them
-to Garmin FIT files, and uploads them to your COROS Training Hub — on a
+to Garmin FIT files, and uploads them to your COROS Training Hub - on a
 schedule, with a built-in status page.
 
 ```
@@ -12,7 +12,7 @@ Peloton API ──► FIT builder ──► zip+md5 ──► COROS upload ─�
 ## Features
 
 - **Backfill sync**: picks up any workout from the last N days (default 7)
-  that is not already in COROS — survives downtime and restarts.
+  that is not already in COROS - survives downtime and restarts.
 - **All disciplines**: cycling, treadmill/outdoor running, rowing, walking,
   strength, yoga, stretching, meditation, bootcamps, cardio.
   Per-second metrics (power, cadence, heart rate, speed, distance) where
@@ -47,10 +47,10 @@ Open http://localhost:8080 for the status page.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `PELOTON_USERNAME` / `PELOTON_PASSWORD` | — | Peloton credentials |
-| `PELOTON_REFRESH_TOKEN` | — | Alternative to password login |
-| `COROS_EMAIL` / `COROS_PASSWORD` | — | COROS credentials |
-| `COROS_ACCESS_TOKEN` | — | Browser session token instead of password (value of the `CPL-coros-token` cookie on training.coros.com) |
+| `PELOTON_USERNAME` / `PELOTON_PASSWORD` | - | Peloton credentials |
+| `PELOTON_REFRESH_TOKEN` | - | Alternative to password login |
+| `COROS_EMAIL` / `COROS_PASSWORD` | - | COROS credentials |
+| `COROS_ACCESS_TOKEN` | - | Browser session token instead of password (value of the `CPL-coros-token` cookie on training.coros.com) |
 | `COROS_REGION` | `en` | `en`, `eu`, or `cn` (uploads unsupported on `cn`) |
 | `PELOCORE_TIMEZONE_QUARTERS` | host offset | COROS timezone in quarter-hours east of UTC (32 = UTC+8) |
 | `PELOCORE_BACKFILL_DAYS` | `7` | How far back to look for unsynced workouts |
@@ -59,7 +59,7 @@ Open http://localhost:8080 for the status page.
 | `PELOCORE_IMPORT_POLL_SECONDS` | `120` | How long to poll COROS import status |
 | `PELOCORE_STATE_PATH` | `data/state.json` | State file location |
 | `PELOCORE_SERVER_HOST` / `PELOCORE_SERVER_PORT` | `0.0.0.0` / `8080` | Status server bind |
-| `PELOCORE_STATUS_TOKEN` | — | When set, `/`, `/api/status`, `/metrics`, `POST /sync` require `Authorization: Bearer <token>`; probes stay open |
+| `PELOCORE_STATUS_TOKEN` | - | When set, `/`, `/api/status`, `/metrics`, `POST /sync` require `Authorization: Bearer <token>`; probes stay open |
 | `PELOCORE_LOG_LEVEL` | `INFO` | Log verbosity |
 
 Credentials may also live in a `.env` file (pydantic-settings loads it).
@@ -96,22 +96,22 @@ until the constants in `src/pelocore/coros.py` are updated.
 
 - **Cycling distance/speed**: Peloton reports speed per second and distance
   only in the performance-graph summaries (there is no per-second distance
-  series for rides). pelocore writes both — session `total_distance`,
+  series for rides). pelocore writes both - session `total_distance`,
   `avg_speed`/`max_speed` (classic + enhanced fields) and per-record
   cumulative distance integrated from the speed series.
-- **`total_work`**: Peloton reports joules; FIT wants kJ — converted.
+- **`total_work`**: Peloton reports joules; FIT wants kJ - converted.
 - **Strength / yoga / stretching**: Peloton strength workouts have no
   per-second data. FIT files carry the class plan as `exercise_title` + `set`
   messages (one per exercise block, named from the plan) plus session
   calories. **COROS's importer categorizes imported files by primary sport
-  only** — anything with FIT sport `TRAINING` lands as Strength (402),
+  only** - anything with FIT sport `TRAINING` lands as Strength (402),
   regardless of sub-sport (verified: yoga/stretching imports with YOGA
   sub-sport still import as Strength), and the muscle heatmap is not
   available for imported activities (COROS derives it server-side from its
   own plan structure; a native watch export contains no muscle data).
 - **Training Load needs heart rate**: imported strength/yoga/stretching
   without HR data gets `trainingLoad = 0` in COROS. Peloton captures HR
-  when you wear a monitor — it flows through to the FIT (session
+  when you wear a monitor - it flows through to the FIT (session
   avg/max HR and per-second records), and COROS then computes a nonzero
   load. Wear the strap for strength and pilates classes if Training Load
   matters to you.
@@ -130,7 +130,7 @@ sensor with whatever is running the class:
   sensor from the app's heart-rate settings before starting the class.
 
 Once paired, HR is captured by Peloton per workout and flows through
-pelocore into the generated FIT files — which is what COROS needs to
+pelocore into the generated FIT files - which is what COROS needs to
 compute Training Load for strength, yoga and stretching imports (and gives
 cycling/running their full HR metrics).
 - Peloton `muscle_group_score` (per-muscle percentages) is available in the
@@ -140,9 +140,9 @@ cycling/running their full HR metrics).
 
 Both modes are shipped under `deploy/k8s/`:
 
-- **`cronjob.yaml`** — one-shot `pelocore sync` every 15 minutes. No volume
+- **`cronjob.yaml`** - one-shot `pelocore sync` every 15 minutes. No volume
   needed: dedupe runs against the COROS import list. Visibility: logs.
-- **`deployment.yaml`** — long-running `pelocore run` with the status page
+- **`deployment.yaml`** - long-running `pelocore run` with the status page
   (ClusterIP Service, liveness/readiness probes, optional PVC for state).
   Keep it at 1 replica: syncers would race on the state file.
 
@@ -226,7 +226,7 @@ $ PELOCORE_LIVE=1 mise exec -- uv run pytest -m live
 
 The CI and release workflows can run locally with
 [nektos/act](https://nektosact.com) (installed via mise; requires Docker).
-This catches CI-only behavior differences — action wrappers, job wiring —
+This catches CI-only behavior differences - action wrappers, job wiring -
 before pushing:
 
 ```console
@@ -237,7 +237,7 @@ $ mise run act-release-verify     # release verify/build path (dry-run)
 Runner images and architecture come from `.actrc`. What act cannot exercise
 locally: keyless cosign signing (needs GitHub's OIDC provider), GHCR push,
 and the SARIF upload to the code-scanning API (needs `GITHUB_TOKEN` with
-`security_events` scope) — those steps stay in real CI.
+`security_events` scope) - those steps stay in real CI.
 
 ### Secrets via 1Password
 
@@ -252,7 +252,7 @@ pattern uses 1Password secret references instead of plaintext values:
    $ op signin               # or unlock via the 1Password desktop app
    ```
 
-2. Point env values at vault items — `op://<vault>/<item>/<field>`:
+2. Point env values at vault items - `op://<vault>/<item>/<field>`:
 
    ```toml
    [env]
@@ -269,7 +269,7 @@ pattern uses 1Password secret references instead of plaintext values:
    run = "op run -- uv run pelocore run"
    ```
 
-Secrets resolved by `op run --` exist only in the child process environment —
+Secrets resolved by `op run --` exist only in the child process environment -
 references never touch disk or shell history. Plain values also work in
 `.mise.local.toml` but are stored in plaintext; prefer references.
 
@@ -294,4 +294,4 @@ with your own credentials, for personal data you own.
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE).
+Apache-2.0 - see [LICENSE](LICENSE).

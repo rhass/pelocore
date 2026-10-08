@@ -112,7 +112,7 @@ class SyncEngine:
         imported = self._reconcile_imported()
         pending = [w for w in candidates if not self._already_synced(w, imported, report)]
 
-        # Phase 1: hydrate everything from Peloton first — fetch performance
+        # Phase 1: hydrate everything from Peloton first - fetch performance
         # data and build the FIT files before touching COROS, so Peloton-side
         # failures never leave a half-synced batch.
         hydrated: list[tuple[PelotonWorkout, bytes]] = []
@@ -166,7 +166,7 @@ class SyncEngine:
                 workout, perf, plan=plan, remaps=self._remaps
             )
             logger.debug(
-                "hydrated %s (%s) — %d records",
+                "hydrated %s (%s) - %d records",
                 workout.id,
                 workout.title,
                 built.record_count,

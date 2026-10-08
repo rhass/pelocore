@@ -95,11 +95,11 @@ def render_html(payload: dict[str, Any]) -> str:
     for error in (last or {}).get("errors", []):
         error_rows.append(
             "<tr>"
-            f"<td>{esc(str(error.get('workout_id') or '—'))}</td>"
-            f"<td>{esc(str(error.get('title') or '—'))}</td>"
-            f"<td>{esc(str(error.get('instructor') or '—'))}</td>"
-            f"<td>{esc(str(error.get('discipline') or '—'))}</td>"
-            f"<td>{esc(str(error.get('source') or '—'))}</td>"
+            f"<td>{esc(str(error.get('workout_id') or '-'))}</td>"
+            f"<td>{esc(str(error.get('title') or '-'))}</td>"
+            f"<td>{esc(str(error.get('instructor') or '-'))}</td>"
+            f"<td>{esc(str(error.get('discipline') or '-'))}</td>"
+            f"<td>{esc(str(error.get('source') or '-'))}</td>"
             f"<td>{esc(str(error.get('error')))}</td>"
             "</tr>"
         )
@@ -109,7 +109,7 @@ def render_html(payload: dict[str, Any]) -> str:
     elif next_in is not None:
         next_sync = f"in {int(next_in)}s"
     else:
-        next_sync = "—"
+        next_sync = "-"
 
     return f"""<!doctype html>
 <html lang="en">

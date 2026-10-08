@@ -40,7 +40,7 @@ DEFAULT_MAPPING = SportMapping(Sport.TRAINING, SubSport.GENERIC, "Training")
 
 #: Built-in discipline remaps for platform compatibility. COROS has no
 #: stretching activity type and buckets unknown TRAINING files into Strength,
-#: so stretching maps to Yoga — the closest supported category.
+#: so stretching maps to Yoga - the closest supported category.
 BUILTIN_REMAPS: dict[str, str] = {
     "stretching": "yoga",
 }

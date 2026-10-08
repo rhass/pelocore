@@ -16,7 +16,7 @@
 #
 #    Then set env values to `op://` references. `op run --` resolves every
 #    value that starts with `op://` and injects the real secret into the
-#    child process — the reference never touches disk or shell history:
+#    child process - the reference never touches disk or shell history:
 #
 #        PELOTON_PASSWORD = "op://Private/pelocore/peloton-password"
 #
@@ -26,12 +26,12 @@
 # 2. Plain values (quick and dirty)
 #
 #    Put real values straight into this file. It is git-ignored, but secrets
-#    still land on disk in plaintext — prefer 1Password references.
+#    still land on disk in plaintext - prefer 1Password references.
 #
 # ---------------------------------------------------------------------------
 
 [tools]
-# 1Password CLI (`op`) — required for the `op run --` task overrides below.
+# 1Password CLI (`op`) - required for the `op run --` task overrides below.
 # `mise use 1password` adds this line for you.
 1password = "latest"
 

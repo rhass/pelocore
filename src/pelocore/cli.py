@@ -56,6 +56,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     subparsers.add_parser(
         "rename", help="rename state-tracked COROS activities to their Peloton titles"
     )
+    fitdump_parser = subparsers.add_parser(
+        "fitdump", help="dump a raw FIT file (works on files fit_tool rejects)"
+    )
+    fitdump_parser.add_argument("file", help="FIT file to inspect")
+    fitdump_parser.add_argument("--json", action="store_true", help="JSON output")
+    fitdump_parser.add_argument("--records", type=int, default=0, metavar="N")
+    fitdump_parser.add_argument("--trace", action="store_true")
 
     args = parser.parse_args(argv)
 
@@ -75,6 +82,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_doctor(settings)
     if args.command == "rename":
         return _cmd_rename(settings)
+    if args.command == "fitdump":
+        from pelocore.fitdump import dump_file
+
+        print(
+            dump_file(
+                args.file, as_json=args.json, records_limit=args.records, trace=args.trace
+            )
+        )
+        return EXIT_OK
     parser.error(f"unknown command {args.command!r}")  # pragma: no cover
     return 2
 

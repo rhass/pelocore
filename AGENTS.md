@@ -56,6 +56,7 @@ Commit and push only when the user asks.
 | `src/pelocore/peloton.py` | pylotoncycle wrapper: listing, performance parsing, class plans |
 | `src/pelocore/coros.py` | COROS client: login, STS, SigV4 S3 PUT, import, poll, rename |
 | `src/pelocore/fitbuild.py` | performance data -> FIT activity files (fit_tool) |
+| `src/pelocore/fitdump.py` | raw FIT walker/decoder for debugging (reads files fit_tool rejects) |
 | `src/pelocore/sports.py` | Peloton discipline -> FIT sport/subsport + remap table |
 | `src/pelocore/sync.py` | orchestrator: two-phase per cycle (hydrate all, then upload) |
 | `src/pelocore/server.py` | loop-mode scheduler + stdlib HTTP server |
@@ -126,6 +127,13 @@ docstrings of `coros.py` and `peloton.py`. Non-obvious traps:
   timestamp-only anchor record.
 - fit_tool cannot parse COROS's own exports (nonstandard field sizes in
   event and field_description messages). Our generated files validate.
+- Debugging FIT contents: `uv run pelocore fitdump <file> [--json]
+  [--records N] [--trace]` (`fitdump.py`). It walks raw records with no
+  profile assumptions and never fails on vendor quirks; use it on COROS
+  exports and to verify our generated files.
+- Message numbering gotcha confirmed empirically: fit_tool writes the
+  activity message as gnum 34 and exercise_title as gnum 264 (not the
+  140/229 one might expect); COROS's own exports agree on 34.
 
 ### Toolchain
 

@@ -147,7 +147,7 @@ def _client() -> CorosClient:
 
 
 @responses.activate
-def test_upload_fit_flow() -> None:
+def test_upload_fit_flow_uses_bff_sts_proxy() -> None:
     responses.post(
         "https://teamapi.coros.com/account/login",
         json={"result": "0000", "message": "", "data": {"accessToken": "tok"}},
@@ -156,7 +156,11 @@ def test_upload_fit_flow() -> None:
         "https://teamapi.coros.com/account/query",
         json={"result": "0000", "message": "", "data": {"userId": "u1", "nickname": "N"}},
     )
-    responses.get("https://faq.coros.com/openapi/oss/sts", json=_sts_response(CRED_S3))
+    responses.get(
+        "https://training.coros.com/api/proxy/oss/sts",
+        match_querystring=False,
+        json=_sts_response(CRED_S3),
+    )
     responses.put(
         re.compile(r"https://coros-s3\.s3\.us-east-1\.amazonaws\.com/fit_zip/u1/.*\.zip"),
         body=b"",
@@ -169,6 +173,11 @@ def test_upload_fit_flow() -> None:
     result = _client().upload_fit(b"FITDATA", "peloton-w1.fit")
     assert result.import_id == "job1"
     assert result.md5 == hashlib.md5(b"FITDATA").hexdigest()
+
+    # STS goes through the Training Hub BFF proxy with cookie auth
+    sts_calls = [c for c in responses.calls if "training.coros.com" in (c.request.url or "")]
+    assert len(sts_calls) == 1
+    assert sts_calls[0].request.headers["Cookie"] == "CPL-coros-token=tok"
 
     # S3 request: SigV4 headers + correct zip body
     s3_req = responses.calls[3].request
@@ -191,6 +200,64 @@ def test_upload_fit_flow() -> None:
     assert f'"md5": "{result.md5}"' in body
     assert '"object": "fit_zip/u1/' + result.md5 + '.zip"' in body
     assert import_req.headers["AccessToken"] == "tok"
+
+
+@responses.activate
+def test_sts_falls_back_to_legacy_endpoint() -> None:
+    responses.post(
+        "https://teamapi.coros.com/account/login",
+        json={"result": "0000", "message": "", "data": {"accessToken": "tok"}},
+    )
+    responses.get(
+        "https://teamapi.coros.com/account/query",
+        json={"result": "0000", "message": "", "data": {"userId": "u1"}},
+    )
+    responses.get("https://training.coros.com/api/proxy/oss/sts", status=404, body="404")
+    responses.get("https://faq.coros.com/openapi/oss/sts", json=_sts_response(CRED_S3))
+    responses.put(
+        re.compile(r"https://coros-s3\.s3\.us-east-1\.amazonaws\.com/.*"),
+        body=b"",
+    )
+    responses.post(
+        "https://teamapi.coros.com/activity/fit/import",
+        json={"result": "0000", "message": "", "data": {"id": "job1"}},
+    )
+    result = _client().upload_fit(b"F", "peloton-w1.fit")
+    assert result.import_id == "job1"
+    legacy_calls = [c for c in responses.calls if "faq.coros.com" in (c.request.url or "")]
+    assert len(legacy_calls) == 1
+
+
+@responses.activate
+def test_sts_fails_when_all_channels_down() -> None:
+    responses.post(
+        "https://teamapi.coros.com/account/login",
+        json={"result": "0000", "message": "", "data": {"accessToken": "tok"}},
+    )
+    responses.get("https://training.coros.com/api/proxy/oss/sts", status=404, body="404")
+    responses.get("https://faq.coros.com/openapi/oss/sts", status=404, body="404")
+    with pytest.raises(CorosHttpError, match="STS failed on all channels"):
+        _client().upload_fit(b"F", "x.fit")
+
+
+@responses.activate
+def test_login_2fa_challenge_raises_actionable_error() -> None:
+    responses.post(
+        "https://teamapi.coros.com/account/login",
+        json={
+            "result": "0000",
+            "message": "OK",
+            "data": {
+                "twoFactorRequired": True,
+                "loginTicket": "ticket-1",
+                "appKey": "app-key-1",
+                "regionId": 1,
+            },
+        },
+    )
+    client = CorosClient(region="en", email="e", password="p")
+    with pytest.raises(CorosAuthError, match="two-factor"):
+        client.account()
 
 
 @responses.activate

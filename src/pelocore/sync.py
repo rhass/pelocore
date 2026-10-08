@@ -8,7 +8,7 @@ from typing import Protocol
 
 from pelocore.config import Settings
 from pelocore.coros import ImportJob, UploadResult
-from pelocore.fitbuild import build_activity_fit
+from pelocore.fitbuild import FitBuildResult, build_activity_fit
 from pelocore.peloton import PelotonSource, PelotonWorkout
 from pelocore.state import CycleError, CycleReport, StateStore
 
@@ -69,8 +69,20 @@ class SyncEngine:
         )
 
         imported = self._reconcile_imported()
-        for workout in candidates:
-            self._sync_workout(workout, imported, report)
+        pending = [w for w in candidates if not self._already_synced(w, imported, report)]
+
+        # Phase 1: hydrate everything from Peloton first — fetch performance
+        # data and build the FIT files before touching COROS, so Peloton-side
+        # failures never leave a half-synced batch.
+        hydrated: list[tuple[PelotonWorkout, bytes]] = []
+        for workout in pending:
+            built = self._hydrate(workout, report)
+            if built is not None:
+                hydrated.append((workout, built.data))
+
+        # Phase 2: upload the fully hydrated batch to COROS.
+        for workout, fit_bytes in hydrated:
+            self._upload(workout, fit_bytes, report)
 
         if report.failed == 0:
             report.outcome = "ok"
@@ -89,18 +101,42 @@ class SyncEngine:
             logger.warning("COROS reconcile failed (%s); relying on local state", exc)
             return None
 
-    def _sync_workout(
+    def _already_synced(
         self, workout: PelotonWorkout, imported: set[str] | None, report: CycleReport
-    ) -> None:
+    ) -> bool:
         filename = fit_filename(workout.id)
         if self._store.is_synced(workout.id) or (imported is not None and filename in imported):
             report.skipped += 1
             logger.debug("skipping already-synced workout %s", workout.id)
-            return
+            return True
+        return False
+
+    def _hydrate(
+        self, workout: PelotonWorkout, report: CycleReport
+    ) -> FitBuildResult | None:
+        """Fetch performance data and build the FIT file; None on failure."""
         try:
             perf = self._peloton.performance(workout.id)
             built = build_activity_fit(workout, perf)
-            upload = self._coros.upload_fit(built.data, filename)
+            logger.debug(
+                "hydrated %s (%s) — %d records",
+                workout.id,
+                workout.title,
+                built.record_count,
+            )
+            return built
+        except Exception as exc:
+            self._record_error(
+                workout, str(exc) or exc.__class__.__name__, report, source="peloton"
+            )
+            return None
+
+    def _upload(
+        self, workout: PelotonWorkout, fit_bytes: bytes, report: CycleReport
+    ) -> None:
+        filename = fit_filename(workout.id)
+        try:
+            upload = self._coros.upload_fit(fit_bytes, filename)
             self._coros.wait_for_import(
                 upload.import_id,
                 timeout_s=self._settings.import_poll_seconds,
@@ -115,33 +151,38 @@ class SyncEngine:
                 discipline=workout.fitness_discipline,
             )
             report.uploaded += 1
-            logger.info(
-                "uploaded %s (%s) — %d records",
-                workout.id,
-                workout.title,
-                built.record_count,
-            )
+            logger.info("uploaded %s (%s)", workout.id, workout.title)
         except Exception as exc:
-            message = str(exc) or exc.__class__.__name__
-            self._store.record_failure(
-                workout.id,
-                message,
+            self._record_error(workout, str(exc) or exc.__class__.__name__, report)
+
+    def _record_error(
+        self,
+        workout: PelotonWorkout,
+        message: str,
+        report: CycleReport,
+        *,
+        source: str | None = None,
+    ) -> None:
+        self._store.record_failure(
+            workout.id,
+            message,
+            title=workout.title,
+            instructor=workout.instructor,
+            discipline=workout.fitness_discipline,
+        )
+        report.failed += 1
+        report.errors.append(
+            CycleError(
+                error=message,
+                at=_now_iso(),
+                source=source,
+                workout_id=workout.id,
                 title=workout.title,
                 instructor=workout.instructor,
                 discipline=workout.fitness_discipline,
             )
-            report.failed += 1
-            report.errors.append(
-                CycleError(
-                    error=message,
-                    at=_now_iso(),
-                    workout_id=workout.id,
-                    title=workout.title,
-                    instructor=workout.instructor,
-                    discipline=workout.fitness_discipline,
-                )
-            )
-            logger.error("failed to sync workout %s: %s", workout.id, message)
+        )
+        logger.error("failed to sync workout %s: %s", workout.id, message)
 
     def _finish(self, report: CycleReport) -> None:
         report.finished_at = _now_iso()

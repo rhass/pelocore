@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pelocore.config import Settings
+from pelocore.coros import UploadResult
+from pelocore.peloton import WorkoutPerformance
 from pelocore.state import StateStore
 from pelocore.sync import SyncEngine, fit_filename
 from tests.conftest import FakeCoros, FakePeloton, cycling_performance, make_workout
@@ -110,3 +112,64 @@ def test_poll_is_called_with_configured_timeout(store: StateStore, settings: Set
     engine = build_engine(peloton, coros, store, settings)
     engine.run_cycle()
     assert coros.polls == [("job-1", settings.import_poll_seconds)]
+
+
+def test_hydration_failure_blocks_upload_for_that_workout(
+    store: StateStore, settings: Settings
+) -> None:
+    """Phase 1 (hydrate) failures must not reach the upload phase."""
+    peloton = FakePeloton(
+        workouts=[make_workout("w1"), make_workout("w2")],
+        performances={"w1": cycling_performance()},  # w2 has no performance data
+        perf_error=RuntimeError("peloton perf 500"),
+    )
+    # FakePeloton.performance raises perf_error for ANY id; make it selective.
+    class SelectivePeloton(FakePeloton):
+        def performance(self, workout_id: str) -> WorkoutPerformance:
+            if workout_id == "w2":
+                raise RuntimeError("peloton perf 500")
+            return super().performance(workout_id)
+
+    coros = FakeCoros()
+    engine = SyncEngine(
+        SelectivePeloton(peloton.workouts, {"w1": cycling_performance()}), coros, store, settings
+    )
+    report = engine.run_cycle()
+
+    assert report.failed == 1
+    assert report.uploaded == 1  # w1 still uploads; only w2's hydration failed
+    assert report.errors[0].source == "peloton"
+    assert report.errors[0].workout_id == "w2"
+    assert len(coros.uploads) == 1  # w2 never reached the upload phase
+
+
+def test_upload_phase_isolated_from_hydration_phase(
+    store: StateStore, settings: Settings
+) -> None:
+    """All hydration happens before any upload: a Peloton outage mid-batch
+    cannot strand already-built workouts unhydrated."""
+    calls: list[str] = []
+
+    class OrderedPeloton(FakePeloton):
+        def performance(self, workout_id: str) -> WorkoutPerformance:
+            calls.append(f"perf:{workout_id}")
+            return super().performance(workout_id)
+
+    class OrderedCoros(FakeCoros):
+        def upload_fit(self, fit_bytes: bytes, filename: str) -> UploadResult:
+            calls.append(f"upload:{filename}")
+            return super().upload_fit(fit_bytes, filename)
+
+    peloton = OrderedPeloton(
+        workouts=[make_workout("w1"), make_workout("w2")],
+        performances={"w1": cycling_performance(), "w2": cycling_performance()},
+    )
+    engine = SyncEngine(peloton, OrderedCoros(), store, settings)
+    report = engine.run_cycle()
+
+    assert report.uploaded == 2
+    perf_calls = [c for c in calls if c.startswith("perf:")]
+    upload_calls = [c for c in calls if c.startswith("upload:")]
+    assert calls.index(perf_calls[-1]) < calls.index(upload_calls[0]), (
+        "all performance fetches must complete before the first upload"
+    )

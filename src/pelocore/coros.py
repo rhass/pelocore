@@ -43,6 +43,27 @@ STS_SIGN: dict[str, str] = {
 }
 STS_BUCKET: dict[str, str] = {"en": "coros-s3", "eu": "eu-coros", "cn": "coros-oss"}
 STS_SERVICE: dict[str, str] = {"en": "aws", "eu": "aws", "cn": "aliyun"}
+#: Training Hub web BFF proxy. Since 2026-10-03 the open STS endpoint
+#: (faq.coros.com/openapi/oss/sts) is offline and STS credentials are fetched
+#: through this proxy, authenticated with the session token as a cookie.
+STS_PROXY: dict[str, str] = {
+    "en": "https://training.coros.com",
+    "eu": "https://training.coros.com",
+    "cn": "https://trainingcn.coros.com",
+}
+
+#: Login requests must look like the Training Hub web app or COROS may treat
+#: them as a bot.
+LOGIN_HEADERS: dict[str, str] = {
+    "Accept": "application/json, text/plain, */*",
+    "Content-Type": "application/json;charset=UTF-8",
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/92.0.4515.39 Safari/537.36"
+    ),
+    "referer": "https://teamapi.coros.com/",
+    "origin": "https://teamapi.coros.com/",
+}
 
 SUCCESS_RESULT = "0000"
 IMPORT_STATUS_SUCCESS = 2
@@ -249,10 +270,25 @@ class CorosClient:
             "accountType": 2,
             "pwd": password_md5(self._password),
         }
-        data = self._request(
-            "POST", self.base_url + "/account/login", json_body=payload, authenticate=False
-        )
-        token = data.get("accessToken") if isinstance(data, dict) else None
+        try:
+            response = self._http.post(
+                self.base_url + "/account/login",
+                data=json.dumps(payload),
+                headers=LOGIN_HEADERS,
+                timeout=self._timeout,
+            )
+        except requests.RequestException as exc:
+            raise CorosHttpError(f"COROS login failed: {exc}") from exc
+        data = _parse_envelope(response, self.base_url + "/account/login")
+        if not isinstance(data, dict):
+            raise CorosAuthError("COROS login response missing data")
+        if data.get("twoFactorRequired") or data.get("loginTicket"):
+            raise CorosAuthError(
+                "COROS account has two-factor authentication enabled; password "
+                "login stops at the 2FA challenge. Use COROS_ACCESS_TOKEN from "
+                "a browser session instead (see README), or disable 2FA."
+            )
+        token = data.get("accessToken")
         if not token:
             raise CorosAuthError("COROS login response missing accessToken")
         self._token = str(token)
@@ -311,6 +347,31 @@ class CorosClient:
             raise CorosError(
                 f"Region {self._region!r} uses Aliyun storage; uploads are not supported."
             )
+        errors: list[str] = []
+        # Channel 1: Training Hub BFF proxy (2026-10-03+; requires the session
+        # token as a cookie).
+        self.ensure_auth()
+        proxy_url = (
+            f"{STS_PROXY[self._region]}/api/proxy/oss/sts"
+            f"?bucket={STS_BUCKET[self._region]}&service={STS_SERVICE[self._region]}&v=2"
+        )
+        try:
+            response = self._http.get(
+                proxy_url,
+                headers={"Accept": "application/json", "Cookie": f"CPL-coros-token={self._token}"},
+                timeout=self._timeout,
+            )
+            creds = _parse_sts_response(response, proxy_url)
+            if creds is not None:
+                return creds
+            errors.append(f"web-proxy: HTTP {response.status_code} {response.text[:120]}")
+        except (CorosHttpError, ValueError) as exc:
+            errors.append(f"web-proxy: {exc}")
+        except requests.RequestException as exc:
+            errors.append(f"web-proxy: {exc}")
+
+        # Channel 2: legacy open endpoint (offline since 2026-10-03; kept as a
+        # fallback in case COROS restores it).
         params = {
             "bucket": STS_BUCKET[self._region],
             "service": STS_SERVICE[self._region],
@@ -318,24 +379,19 @@ class CorosClient:
             "app_id": STS_APP_ID,
             "sign": STS_SIGN[self._region],
         }
+        legacy_url = FAQ_API_URL + "/openapi/oss/sts"
         try:
-            response = self._http.get(
-                FAQ_API_URL + "/openapi/oss/sts", params=params, timeout=self._timeout
-            )
+            response = self._http.get(legacy_url, params=params, timeout=self._timeout)
+            creds = _parse_sts_response(response, legacy_url)
+            if creds is not None:
+                return creds
+            errors.append(f"legacy: HTTP {response.status_code} {response.text[:120]}")
+        except (CorosHttpError, ValueError) as exc:
+            errors.append(f"legacy: {exc}")
         except requests.RequestException as exc:
-            raise CorosHttpError(f"STS request failed: {exc}") from exc
-        try:
-            body = response.json()
-        except ValueError as exc:
-            raise CorosHttpError(f"STS returned non-JSON (HTTP {response.status_code})") from exc
-        if body.get("code") != 200 or not body.get("data", {}).get("credentials"):
-            raise CorosHttpError(
-                f"STS failed: {body.get('msg', 'unknown')} (code {body.get('code')})"
-            )
-        try:
-            return decode_sts_credentials(body["data"]["credentials"])
-        except (ValueError, KeyError) as exc:
-            raise CorosHttpError("STS credentials could not be decoded") from exc
+            errors.append(f"legacy: {exc}")
+
+        raise CorosHttpError("STS failed on all channels: " + " | ".join(errors))
 
     def _s3_put(self, creds: S3Credentials, key: str, body: bytes) -> None:
         host = f"{creds.bucket}.s3.{creds.region}.amazonaws.com"
@@ -475,6 +531,29 @@ class CorosClient:
             if time.monotonic() >= deadline:
                 return last
             time.sleep(interval_s)
+
+
+def _parse_sts_response(response: requests.Response, url: str) -> S3Credentials | None:
+    """Parse an STS payload; ``None`` means "try the next channel".
+
+    ``faq.coros.com`` uses ``{code, msg, data}`` (plain HTTP status); the
+    Training Hub BFF proxy answers ``HTTP 200`` with ``{code: 200, ...}``.
+    """
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise CorosHttpError(
+            f"STS returned non-JSON (HTTP {response.status_code}) from {url}"
+        ) from exc
+    if response.status_code >= 400 or body.get("code") != 200:
+        return None
+    credentials = (body.get("data") or {}).get("credentials")
+    if not credentials:
+        return None
+    try:
+        return decode_sts_credentials(credentials)
+    except (ValueError, KeyError) as exc:
+        raise CorosHttpError("STS credentials could not be decoded") from exc
 
 
 def _parse_envelope(response: requests.Response, url: str) -> Any:

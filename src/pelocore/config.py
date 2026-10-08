@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     )
 
     # Sync behaviour.
+    sport_remaps: str = Field(
+        default="",
+        validation_alias=AliasChoices("PELOCORE_SPORT_REMAPS", "sport_remaps"),
+    )
     backfill_days: int = Field(
         default=7,
         ge=1,

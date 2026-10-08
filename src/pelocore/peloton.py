@@ -18,6 +18,9 @@ MAX_PAGES = 10
 MILE_IN_METERS = 1609.344
 MPH_TO_MPS = 0.44704
 
+#: display_unit → meters (perf-graph summaries report distance as miles)
+_DISTANCE_UNITS = {"mi": MILE_IN_METERS, "mile": MILE_IN_METERS, "km": 1000.0, "m": 1.0}
+
 
 @dataclass(frozen=True)
 class PelotonWorkout:
@@ -29,7 +32,8 @@ class PelotonWorkout:
     end_time: int | None
     title: str
     instructor: str | None
-    total_work: float | None = None
+    ride_id: str | None = None
+    total_work: float | None = None  # kJ (Peloton reports joules; converted)
     ftp: float | None = None
 
 
@@ -62,11 +66,33 @@ class WorkoutPerformance:
     duration_s: int
     samples: list[PerformanceSample]
     locations: list[LocationPoint]
+    summary: PerformanceSummary | None = None
+
+
+@dataclass(frozen=True)
+class PerformanceSummary:
+    """Totals from the perf graph ``summaries`` block (the only source of
+    distance for cycling)."""
+
+    total_distance_m: float | None = None
+    total_calories: float | None = None
+    total_output_kj: float | None = None
+
+
+@dataclass(frozen=True)
+class ExerciseBlock:
+    """One exercise block from the strength class plan."""
+
+    name: str
+    duration_s: int
+    muscle_groups: tuple[str, ...] = ()
 
 
 class PelotonSource(Protocol):
     def workouts_since(self, days: int) -> list[PelotonWorkout]: ...
     def performance(self, workout_id: str) -> WorkoutPerformance: ...
+    def workout_by_id(self, workout_id: str) -> PelotonWorkout | None: ...
+    def class_plan(self, ride_id: str) -> list[ExerciseBlock]: ...
 
 
 def parse_performance(pg: dict[str, Any]) -> WorkoutPerformance:
@@ -83,7 +109,44 @@ def parse_performance(pg: dict[str, Any]) -> WorkoutPerformance:
         samples = [_sample_from_location(loc) for loc in locations]
     else:
         samples = _parse_metric_samples(pg)
-    return WorkoutPerformance(duration_s=duration, samples=samples, locations=locations)
+    summary = _parse_summaries(pg.get("summaries") or [])
+    return WorkoutPerformance(
+        duration_s=duration, samples=samples, locations=locations, summary=summary
+    )
+
+
+def _parse_summaries(summaries: list[Any]) -> PerformanceSummary | None:
+    """Extract totals from the ``summaries`` block.
+
+    For cycling this is the only source of distance — Peloton does not emit a
+    per-second distance series for rides.
+    """
+    distance: float | None = None
+    distance_unit: str | None = None
+    calories: float | None = None
+    output_kj: float | None = None
+    for entry in summaries or []:
+        if not isinstance(entry, dict):
+            continue
+        slug = entry.get("slug")
+        value = entry.get("value")
+        if value is None or not isinstance(slug, str):
+            continue
+        if slug in ("distance", "total_distance"):
+            distance = _maybe_float(value)
+            distance_unit = entry.get("display_unit")
+        elif slug in ("calories", "total_calories"):
+            calories = _maybe_float(value)
+        elif slug == "total_output":
+            output_kj = _maybe_float(value)
+    if distance is not None and distance_unit is not None:
+        factor = _DISTANCE_UNITS.get(distance_unit.lower())
+        distance = distance * factor if factor is not None else distance * MILE_IN_METERS
+    if distance is None and calories is None and output_kj is None:
+        return None
+    return PerformanceSummary(
+        total_distance_m=distance, total_calories=calories, total_output_kj=output_kj
+    )
 
 
 def _parse_locations(location_data: list[Any]) -> list[LocationPoint]:
@@ -276,6 +339,47 @@ class PylotonClient:
         )  # every_n=1 → second-by-second samples
         return parse_performance(self._get_json(url))
 
+    def workout_by_id(self, workout_id: str) -> PelotonWorkout | None:
+        raw = self._get_json(f"https://api.onepeloton.com/api/workout/{workout_id}")
+        return _normalize_workout(raw)
+
+    def class_plan(self, ride_id: str) -> list[ExerciseBlock]:
+        """Per-exercise blocks from the strength class plan.
+
+        The plan carries names, durations and muscle groups for each block —
+        the performed workout itself has no per-second data.
+        """
+        try:
+            details = self._get_json(f"https://api.onepeloton.com/api/ride/{ride_id}/details")
+        except Exception:
+            return []
+        blocks: list[ExerciseBlock] = []
+        segments = ((details.get("segments") or {}).get("segment_list")) or []
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            for sub in segment.get("subsegments_v2") or []:
+                if not isinstance(sub, dict):
+                    continue
+                movements = sub.get("subsegments") or []
+                for movement in movements:
+                    if not isinstance(movement, dict) or not movement.get("name"):
+                        continue
+                    groups = tuple(
+                        str(g.get("muscle_group"))
+                        for g in (movement.get("muscle_groups") or [])
+                        if isinstance(g, dict) and g.get("muscle_group")
+                    )
+                    blocks.append(
+                        ExerciseBlock(
+                            name=str(movement["name"]),
+                            duration_s=int(sub.get("length") or 0),
+                            muscle_groups=groups,
+                        )
+                    )
+                    break  # one movement per block; alternatives are variants
+        return blocks
+
 
 def _normalize_workout(raw: dict[str, Any]) -> PelotonWorkout | None:
     workout_id = raw.get("id")
@@ -290,6 +394,7 @@ def _normalize_workout(raw: dict[str, Any]) -> PelotonWorkout | None:
     elif isinstance(embedded_instructor, str):
         instructor = embedded_instructor
     ftp = (raw.get("ftp") or {}).get("ftp") if isinstance(raw.get("ftp"), dict) else None
+    total_work_j = _maybe_float(raw.get("total_work"))
     return PelotonWorkout(
         id=str(workout_id),
         status=str(raw.get("status") or ""),
@@ -299,7 +404,9 @@ def _normalize_workout(raw: dict[str, Any]) -> PelotonWorkout | None:
         end_time=int(raw["end_time"]) if raw.get("end_time") is not None else None,
         title=str(title),
         instructor=instructor,
-        total_work=_maybe_float(raw.get("total_work")),
+        ride_id=str(ride.get("id")) if isinstance(ride, dict) and ride.get("id") else None,
+        # Peloton reports total_work in joules; FIT wants kJ.
+        total_work=total_work_j / 1000.0 if total_work_j is not None else None,
         ftp=_maybe_float(ftp),
     )
 

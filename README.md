@@ -54,6 +54,7 @@ Open http://localhost:8080 for the status page.
 | `COROS_REGION` | `en` | `en`, `eu`, or `cn` (uploads unsupported on `cn`) |
 | `PELOCORE_TIMEZONE_QUARTERS` | host offset | COROS timezone in quarter-hours east of UTC (32 = UTC+8) |
 | `PELOCORE_BACKFILL_DAYS` | `7` | How far back to look for unsynced workouts |
+| `PELOCORE_SPORT_REMAPS` | `stretching=yoga` built-in | Discipline remaps, e.g. `meditation=yoga`. COROS has no stretching type and buckets unknown TRAINING files into Strength, so stretching maps to Yoga by default; Pilates has a native mapping |
 | `PELOCORE_SYNC_INTERVAL_SECONDS` | `900` | Loop-mode cycle interval |
 | `PELOCORE_IMPORT_POLL_SECONDS` | `120` | How long to poll COROS import status |
 | `PELOCORE_STATE_PATH` | `data/state.json` | State file location |
@@ -90,6 +91,25 @@ pelocore implements the reverse-engineered Training Hub upload protocol:
 
 If COROS rotates the STS signs, uploads fail with `401 signature error`
 until the constants in `src/pelocore/coros.py` are updated.
+
+## Data fidelity notes
+
+- **Cycling distance/speed**: Peloton reports speed per second and distance
+  only in the performance-graph summaries (there is no per-second distance
+  series for rides). pelocore writes both — session `total_distance`,
+  `avg_speed`/`max_speed` (classic + enhanced fields) and per-record
+  cumulative distance integrated from the speed series.
+- **`total_work`**: Peloton reports joules; FIT wants kJ — converted.
+- **Strength sessions**: Peloton strength workouts have no per-second data.
+  FIT files carry the class plan as `exercise_title` + `set` messages
+  (one per exercise block, named from the plan) plus session calories —
+  enough for COROS Training Load. Whether COROS renders the exercise list /
+  muscle heatmap for *imported* files is under observation: COROS computes
+  heatmaps by matching exercise names against its library, but its own
+  watch-export FITs do not contain muscle data at all (verified by parsing
+  a native export), so this may be a platform limitation.
+- Peloton `muscle_group_score` (per-muscle percentages) is available in the
+  API but has no standard FIT representation; it is not written today.
 
 ## Kubernetes
 

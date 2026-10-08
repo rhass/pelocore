@@ -41,6 +41,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     sync_parser.add_argument(
         "--once", action="store_true", help="explicit one-shot mode (the default)"
     )
+    sync_parser.add_argument(
+        "--workout-id",
+        metavar="ID",
+        help="import a single Peloton workout by id, bypassing the backfill window",
+    )
+    sync_parser.add_argument(
+        "--force", action="store_true", help="upload even if state/COROS says it is synced"
+    )
 
     subparsers.add_parser("run", help="run the loop server with the status page")
     subparsers.add_parser("status", help="print recent sync history from the state file")
@@ -55,7 +63,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     if args.command == "sync":
-        return _cmd_sync(settings)
+        return _cmd_sync(settings, args.workout_id, force=args.force)
     if args.command == "run":
         return _cmd_run(settings)
     if args.command == "status":
@@ -86,9 +94,12 @@ def build_engine(settings: Settings) -> tuple[SyncEngine, StateStore]:
     return SyncEngine(peloton, coros, store, settings), store
 
 
-def _cmd_sync(settings: Settings) -> int:
+def _cmd_sync(settings: Settings, workout_id: str | None = None, *, force: bool = False) -> int:
     engine, _store = build_engine(settings)
-    report = engine.run_cycle(trigger="cli")
+    if workout_id:
+        report = engine.sync_workout_by_id(workout_id, force=force)
+    else:
+        report = engine.run_cycle(trigger="cli")
     print(report.summary_line())
     for error in report.errors:
         print(f"  error: {error.workout_id or 'cycle'}: {error.error}", file=sys.stderr)

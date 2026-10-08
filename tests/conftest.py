@@ -9,8 +9,13 @@ import threading
 import pytest
 
 from pelocore.config import Settings
-from pelocore.coros import UploadResult
-from pelocore.peloton import PelotonWorkout, PerformanceSample, WorkoutPerformance
+from pelocore.coros import ActivityItem, UploadResult
+from pelocore.peloton import (
+    ExerciseBlock,
+    PelotonWorkout,
+    PerformanceSample,
+    WorkoutPerformance,
+)
 from pelocore.state import CycleReport, StateStore
 
 
@@ -31,11 +36,13 @@ class FakePeloton:
         self,
         workouts: list[PelotonWorkout] | None = None,
         performances: dict[str, WorkoutPerformance] | None = None,
+        plans: dict[str, list[ExerciseBlock]] | None = None,
         list_error: Exception | None = None,
         perf_error: Exception | None = None,
     ):
         self.workouts = list(workouts or [])
         self.performances = dict(performances or {})
+        self.plans = dict(plans or {})
         self.list_error = list_error
         self.perf_error = perf_error
 
@@ -43,6 +50,12 @@ class FakePeloton:
         if self.list_error:
             raise self.list_error
         return list(self.workouts)
+
+    def workout_by_id(self, workout_id: str) -> PelotonWorkout | None:
+        return next((w for w in self.workouts if w.id == workout_id), None)
+
+    def class_plan(self, ride_id: str) -> list[ExerciseBlock]:
+        return list(self.plans.get(ride_id, []))
 
     def performance(self, workout_id: str) -> WorkoutPerformance:
         if self.perf_error:
@@ -59,11 +72,21 @@ class FakeCoros:
         self,
         imported: set[str] | None = None,
         upload_error: Exception | None = None,
+        activities: list[ActivityItem] | None = None,
     ):
         self.imported = set(imported or ())
         self.upload_error = upload_error
+        self.activities = list(activities or [])
+        self.deleted: list[str] = []
         self.uploads: list[tuple[bytes, str]] = []
         self.polls: list[tuple[str, float]] = []
+
+    def all_activities(self) -> list[ActivityItem]:
+        return list(self.activities)
+
+    def delete_activity(self, label_id: str) -> None:
+        self.deleted.append(label_id)
+        self.activities = [a for a in self.activities if a.label_id != label_id]
 
     def imported_filenames(self) -> set[str]:
         return set(self.imported)
@@ -122,6 +145,7 @@ def make_workout(
     outdoor: bool = False,
     title: str = "Power Zone Ride",
     instructor: str | None = "Denis Morton",
+    ride_id: str | None = "ride-1",
 ) -> PelotonWorkout:
     return PelotonWorkout(
         id=workout_id,
@@ -132,9 +156,11 @@ def make_workout(
         end_time=1_700_000_900,
         title=title,
         instructor=instructor,
+        ride_id=ride_id,
         total_work=586.0,
         ftp=250.0,
     )
+
 
 
 def cycling_performance() -> WorkoutPerformance:

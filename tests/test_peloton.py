@@ -204,3 +204,38 @@ def test_performance_fetch() -> None:
     perf = client.performance("w1")
     assert perf.duration_s == 2
     assert perf.samples[1].power == 60.0
+
+
+def test_parse_summaries_distance_units() -> None:
+    pg = {
+        "duration": 10,
+        "metrics": [{"slug": "output", "values": [1, 2, 3]}],
+        "summaries": [
+            {"slug": "distance", "value": 2.2987, "display_unit": "mi"},
+            {"slug": "calories", "value": 100, "display_unit": "kcal"},
+            {"slug": "total_output", "value": 41, "display_unit": "kj"},
+        ],
+    }
+    perf = parse_performance(pg)
+    assert perf.summary is not None
+    summary_distance = perf.summary.total_distance_m
+    assert summary_distance is not None
+    assert abs(summary_distance - 2.2987 * 1609.344) < 1e-6
+    assert perf.summary.total_calories == 100.0
+    assert perf.summary.total_output_kj == 41.0
+
+
+def test_parse_summaries_absent() -> None:
+    assert parse_performance({"duration": 5, "metrics": []}).summary is None
+
+
+def test_normalize_workout_converts_total_work_joules_to_kj() -> None:
+    raw = _workout("w9", FUTURE)
+    raw["total_work"] = 41189.94
+    from pelocore.peloton import _normalize_workout
+
+    workout = _normalize_workout(raw)
+    assert workout is not None
+    total_work_kj = workout.total_work
+    assert total_work_kj is not None
+    assert abs(total_work_kj - 41.18994) < 1e-9

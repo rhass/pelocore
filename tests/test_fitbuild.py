@@ -8,7 +8,13 @@ from fit_tool import FitFile
 from fit_tool.profile.profile_type import Sport, SubSport
 
 from pelocore.fitbuild import build_activity_fit
-from pelocore.peloton import LocationPoint, PerformanceSample, WorkoutPerformance
+from pelocore.peloton import (
+    ExerciseBlock,
+    LocationPoint,
+    PerformanceSample,
+    PerformanceSummary,
+    WorkoutPerformance,
+)
 from tests.conftest import make_workout
 
 START = 1_700_000_000
@@ -152,3 +158,83 @@ def test_end_offset_uses_duration_when_present() -> None:
     result = build_activity_fit(workout, perf)
     session = data_rows(result.data, "session")[0]
     assert session["total_timer_time"] == 30
+
+
+def test_cycling_session_carries_distance_and_speed() -> None:
+    """Cycling: distance comes from the summaries block (Peloton has no
+    per-second distance series), speed from the speed slug; both classic and
+    enhanced session fields are written."""
+    workout = make_workout()
+    perf = WorkoutPerformance(
+        duration_s=10,
+        summary=PerformanceSummary(
+            total_distance_m=2298.7 * 1609.344 / 1000, total_calories=100.0, total_output_kj=41.0
+        ),
+        samples=[
+            PerformanceSample(offset=i, power=100 + i, cadence=85, heart_rate=120 + i,
+                              speed_ms=4.8 + i * 0.1)
+            for i in range(10)
+        ],
+        locations=[],
+    )
+    result = build_activity_fit(workout, perf)
+    fit = FitFile.from_bytes(result.data)
+    assert not fit.validate().has_errors, fit.validate().errors
+
+    session = data_rows(result.data, "session")[0]
+    assert abs(session["total_distance"] - 2298.7 * 1609.344 / 1000) < 0.1
+    assert abs(session["max_speed"] - (4.8 + 0.9)) < 0.01
+    assert abs(session["enhanced_max_speed"] - (4.8 + 0.9)) < 0.01
+    assert session["avg_speed"] > 0
+    assert abs(session["total_work"] - 41.0) < 0.01
+    assert session["total_calories"] == 100
+
+    records = data_rows(result.data, "record")
+    # cumulative distance integrated from speed: ~sum(speed_ms * 1s)
+    assert records[-1]["distance"] > 0
+
+
+def test_running_distance_slug_wins_over_integration() -> None:
+    workout = make_workout(discipline="running")
+    perf = WorkoutPerformance(
+        duration_s=3,
+        summary=PerformanceSummary(total_distance_m=999.0),
+        samples=[
+            PerformanceSample(offset=i, speed_ms=3.0, distance_m=i * 10.0)
+            for i in range(3)
+        ],
+        locations=[],
+    )
+    result = build_activity_fit(workout, perf)
+    session = data_rows(result.data, "session")[0]
+    assert session["total_distance"] == 999.0  # Peloton summary is authoritative
+
+
+def test_strength_sets_and_exercise_titles() -> None:
+    workout = make_workout(discipline="strength", title="Metal Full Body Strength")
+    plan = [
+        ExerciseBlock(name="Squat Jumps", duration_s=45, muscle_groups=("quads", "glutes")),
+        ExerciseBlock(name="Push-ups", duration_s=45, muscle_groups=("chest",)),
+    ]
+    result = build_activity_fit(workout, None, plan=plan)
+    fit = FitFile.from_bytes(result.data)
+    assert not fit.validate().has_errors, fit.validate().errors
+
+    rows = fit.to_rows()
+    titles = [r for r in rows if r[0] == "Data" and r[2] == "exercise_title"]
+    sets = [r for r in rows if r[0] == "Data" and r[2] == "set"]
+    assert len(titles) == 2
+    assert len(sets) == 2
+
+    def fields(row: list[Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        i = 3
+        while i < len(row):
+            out[str(row[i])] = row[i + 1] if i + 1 < len(row) else None
+            i += 3
+        return out
+
+    assert "Squat Jumps" in str(fields(titles[0]).values())
+    set_fields = fields(sets[0])
+    assert set_fields.get("duration") == 45000  # ms
+    assert set_fields.get("set_type") == 1  # active

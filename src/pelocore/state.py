@@ -34,6 +34,7 @@ class WorkoutRecord:
     title: str | None = None
     instructor: str | None = None
     discipline: str | None = None
+    start_time: int | None = None  # Peloton epoch seconds
     attempts: int = 1
     last_error: str | None = None
 
@@ -49,6 +50,7 @@ class WorkoutRecord:
             title=data.get("title"),
             instructor=data.get("instructor"),
             discipline=data.get("discipline"),
+            start_time=data.get("start_time"),
             attempts=int(data.get("attempts", 1)),
             last_error=data.get("last_error"),
         )
@@ -190,6 +192,7 @@ class StateStore:
         title: str | None,
         instructor: str | None,
         discipline: str | None,
+        start_time: int | None = None,
     ) -> WorkoutRecord:
         with self._lock:
             previous = self._workouts.get(workout_id)
@@ -203,6 +206,7 @@ class StateStore:
                 title=title,
                 instructor=instructor,
                 discipline=discipline,
+                start_time=start_time,
                 attempts=(previous.attempts if previous else 0) + 1,
             )
             self._workouts[workout_id] = rec
@@ -238,6 +242,11 @@ class StateStore:
             uploaded = sum(1 for r in self._workouts.values() if r.status == "uploaded")
             failed = len(self._workouts) - uploaded
             return {"synced": uploaded, "failed": failed}
+
+    def workouts_remove(self, workout_id: str) -> None:
+        """Drop a workout record entirely (used by the backfill re-upload)."""
+        with self._lock:
+            self._workouts.pop(workout_id, None)
 
     # -- cycle history ------------------------------------------------------
 

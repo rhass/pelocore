@@ -367,3 +367,36 @@ def test_imported_filenames_and_oriFileName_fallback() -> None:
     )
     client = CorosClient(region="en", access_token="t")
     assert client.imported_filenames() == {"peloton-w1.fit", "peloton-w2.fit"}
+
+
+@responses.activate
+def test_list_and_delete_activities() -> None:
+    responses.post(
+        "https://teamapi.coros.com/account/login",
+        json={"result": "0000", "message": "", "data": {"accessToken": "tok"}},
+    )
+    responses.post(
+        "https://teamapi.coros.com/activity/query",
+        json={
+            "result": "0000",
+            "message": "",
+            "data": {
+                "dataList": [
+                    {"labelId": "L1", "sportType": 201, "startTime": 1790609209, "name": "Ride"},
+                    {"labelId": "L2", "sportType": 402, "startTime": 1790600000},
+                ],
+                "totalPage": 1,
+            },
+        },
+    )
+    responses.get(
+        "https://teamapi.coros.com/activity/delete",
+        match_querystring=False,
+        json={"result": "0000", "message": ""},
+    )
+    client = CorosClient(region="en", access_token="t")
+    activities = client.all_activities()
+    assert [a.label_id for a in activities] == ["L1", "L2"]
+    client.delete_activity("L1")
+    del_call = next(c for c in responses.calls if "activity/delete" in (c.request.url or ""))
+    assert "labelId=L1" in (del_call.request.url or "")

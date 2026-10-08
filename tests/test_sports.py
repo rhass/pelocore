@@ -56,3 +56,36 @@ def test_unknown_defaults_to_training() -> None:
     assert m.sport == Sport.TRAINING
     assert m.sub_sport == SubSport.GENERIC
     assert m.label == "Training"
+
+
+def test_pilates_explicit_mapping() -> None:
+    m = mapping_for("pilates")
+    assert m.sport == Sport.TRAINING
+    assert m.sub_sport == SubSport.PILATES
+
+
+def test_builtin_remap_stretching_to_yoga() -> None:
+    from pelocore.sports import remap_discipline
+
+    assert remap_discipline("stretching") == "yoga"
+    m = mapping_for(remap_discipline("stretching"))
+    assert m.sub_sport == SubSport.YOGA
+
+
+def test_remap_extra_overrides_builtin() -> None:
+    from pelocore.sports import remap_discipline
+
+    assert remap_discipline("stretching", {"stretching": "stretching"}) == "stretching"
+    assert remap_discipline("meditation", {"meditation": "yoga"}) == "yoga"
+    assert remap_discipline("cycling", {"meditation": "yoga"}) == "cycling"
+
+
+def test_parse_remaps() -> None:
+    from pelocore.sports import parse_remaps
+
+    assert parse_remaps("stretching=yoga, meditation=yoga") == {
+        "stretching": "yoga",
+        "meditation": "yoga",
+    }
+    assert parse_remaps("") == {}
+    assert parse_remaps("garbage") == {}

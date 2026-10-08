@@ -9,7 +9,8 @@ from typing import Protocol
 from pelocore.config import Settings
 from pelocore.coros import ImportJob, UploadResult
 from pelocore.fitbuild import FitBuildResult, build_activity_fit
-from pelocore.peloton import PelotonSource, PelotonWorkout
+from pelocore.peloton import ExerciseBlock, PelotonSource, PelotonWorkout
+from pelocore.sports import parse_remaps
 from pelocore.state import CycleError, CycleReport, StateStore
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,46 @@ class SyncEngine:
         self._coros = coros
         self._store = store
         self._settings = settings
+        self._remaps = parse_remaps(settings.sport_remaps)
+
+    def sync_workout_by_id(self, workout_id: str, *, force: bool = False) -> CycleReport:
+        """Targeted import of a single workout, bypassing the backfill window."""
+        report = CycleReport(started_at=_now_iso(), trigger="manual")
+        try:
+            workout = self._peloton.workout_by_id(workout_id)
+        except Exception as exc:
+            report.outcome = "failed"
+            report.errors.append(
+                CycleError(
+                    error=f"fetching workout {workout_id}: {exc}",
+                    at=_now_iso(),
+                    source="peloton",
+                )
+            )
+            self._finish(report)
+            return report
+        if workout is None:
+            report.outcome = "failed"
+            report.errors.append(
+                CycleError(
+                    error=f"workout {workout_id} not found",
+                    at=_now_iso(),
+                    source="peloton",
+                )
+            )
+            self._finish(report)
+            return report
+        report.fetched = 1
+        imported = None if force else self._reconcile_imported()
+        if not force and self._already_synced(workout, imported, report):
+            self._finish(report)
+            return report
+        built = self._hydrate(workout, report)
+        if built is not None:
+            self._upload(workout, built.data, report)
+        report.outcome = "ok" if report.failed == 0 else "failed"
+        self._finish(report)
+        return report
 
     def run_cycle(self, *, trigger: str = "scheduled") -> CycleReport:
         report = CycleReport(started_at=_now_iso(), trigger=trigger)
@@ -114,10 +155,16 @@ class SyncEngine:
     def _hydrate(
         self, workout: PelotonWorkout, report: CycleReport
     ) -> FitBuildResult | None:
-        """Fetch performance data and build the FIT file; None on failure."""
+        """Fetch performance data (and the class plan for strength) and build
+        the FIT file; None on failure."""
         try:
             perf = self._peloton.performance(workout.id)
-            built = build_activity_fit(workout, perf)
+            plan: list[ExerciseBlock] | None = None
+            if not perf.samples and not perf.locations and workout.ride_id:
+                plan = self._peloton.class_plan(workout.ride_id) or None
+            built = build_activity_fit(
+                workout, perf, plan=plan, remaps=self._remaps
+            )
             logger.debug(
                 "hydrated %s (%s) — %d records",
                 workout.id,
@@ -149,6 +196,7 @@ class SyncEngine:
                 title=workout.title,
                 instructor=workout.instructor,
                 discipline=workout.fitness_discipline,
+                start_time=workout.start_time,
             )
             report.uploaded += 1
             logger.info("uploaded %s (%s)", workout.id, workout.title)

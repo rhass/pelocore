@@ -15,14 +15,16 @@ from datetime import UTC, datetime
 from fit_tool import FitFile, FitFileBuilder
 from fit_tool.profile.messages.activity_message import ActivityMessage
 from fit_tool.profile.messages.event_message import EventMessage
+from fit_tool.profile.messages.exercise_title_message import ExerciseTitleMessage
 from fit_tool.profile.messages.file_id_message import FileIdMessage
 from fit_tool.profile.messages.lap_message import LapMessage
 from fit_tool.profile.messages.record_message import RecordMessage
 from fit_tool.profile.messages.session_message import SessionMessage
+from fit_tool.profile.messages.set_message import SetMessage
 from fit_tool.profile.profile_type import Event, EventType, FileType, Manufacturer
 
-from pelocore.peloton import PelotonWorkout, WorkoutPerformance
-from pelocore.sports import SportMapping, mapping_for
+from pelocore.peloton import ExerciseBlock, PelotonWorkout, WorkoutPerformance
+from pelocore.sports import SportMapping, mapping_for, remap_discipline
 
 #: Peloton performance data is imperial in the API; convert for FIT.
 MPH_TO_MPS = 0.44704
@@ -45,9 +47,14 @@ class FitBuildResult:
 
 
 def build_activity_fit(
-    workout: PelotonWorkout, perf: WorkoutPerformance | None = None
+    workout: PelotonWorkout,
+    perf: WorkoutPerformance | None = None,
+    *,
+    plan: list[ExerciseBlock] | None = None,
+    remaps: dict[str, str] | None = None,
 ) -> FitBuildResult:
-    mapping = mapping_for(workout.fitness_discipline, is_outdoor=workout.is_outdoor)
+    effective = remap_discipline(workout.fitness_discipline, remaps)
+    mapping = mapping_for(effective, is_outdoor=workout.is_outdoor)
     start_ms = workout.start_time * 1000
     end_offset = _end_offset_s(workout, perf)
     end_ms = start_ms + end_offset * 1000
@@ -78,6 +85,9 @@ def build_activity_fit(
         records = [anchor]
     for record in records:
         builder.add(record)
+
+    if plan and not (perf and (perf.samples or perf.locations)):
+        _add_strength_structure(builder, plan, start_ms)
 
     builder.add(_lap_message(mapping, workout, perf, start_ms, end_ms, end_offset))
 
@@ -127,6 +137,7 @@ def _serial_number(workout_id: str) -> int:
 def _record_messages(perf: WorkoutPerformance | None, start_ms: int) -> list[RecordMessage]:
     if perf is None:
         return []
+    distance_series = _distance_series(perf)
     records: list[RecordMessage] = []
     if perf.locations:
         for point in perf.locations:
@@ -143,7 +154,7 @@ def _record_messages(perf: WorkoutPerformance | None, start_ms: int) -> list[Rec
                 record.enhanced_speed = point.speed_ms
             records.append(record)
         return records
-    for sample in perf.samples:
+    for index, sample in enumerate(perf.samples):
         record = RecordMessage()
         record.timestamp = start_ms + sample.offset * 1000
         if sample.power is not None:
@@ -158,8 +169,10 @@ def _record_messages(perf: WorkoutPerformance | None, start_ms: int) -> list[Rec
             # definition otherwise.
             record.speed = sample.speed_ms
             record.enhanced_speed = sample.speed_ms
-        if sample.distance_m is not None:
-            record.distance = sample.distance_m
+        integrated = distance_series[index] if distance_series else None
+        distance = sample.distance_m if sample.distance_m is not None else integrated
+        if distance is not None:
+            record.distance = distance
         if sample.resistance is not None:
             record.resistance = round(sample.resistance)
         records.append(record)
@@ -170,21 +183,52 @@ def _record_messages(perf: WorkoutPerformance | None, start_ms: int) -> list[Rec
 class _Aggregates:
     total_distance: float | None = None
     total_calories: float | None = None
+    total_output_kj: float | None = None
     avg_power: float | None = None
     max_power: float | None = None
     avg_heart_rate: float | None = None
     max_heart_rate: float | None = None
     avg_cadence: float | None = None
     max_cadence: float | None = None
+    avg_speed: float | None = None
+    max_speed: float | None = None
+
+
+def _distance_series(perf: WorkoutPerformance | None) -> list[float | None] | None:
+    """Cumulative per-sample distance in meters.
+
+    Priority: Peloton distance slug (running) → integration of Peloton speed
+    (cycling reports speed but no distance series). None when neither exists.
+    """
+    if perf is None or not perf.samples:
+        return None
+    samples = perf.samples
+    if any(s.distance_m is not None for s in samples):
+        return [s.distance_m for s in samples]
+    if any(s.speed_ms is not None for s in samples):
+        out: list[float | None] = []
+        accumulated = 0.0
+        previous = samples[0].offset
+        for sample in samples:
+            delta = sample.offset - previous
+            previous = sample.offset
+            if sample.speed_ms is not None and delta > 0:
+                accumulated += sample.speed_ms * delta
+            out.append(accumulated)
+        return out
+    return None
 
 
 def _aggregate(perf: WorkoutPerformance | None) -> _Aggregates:
     if perf is None:
         return _Aggregates()
     samples = perf.samples
+    distance_series = _distance_series(perf)
     total_distance = next(
         (s.distance_m for s in reversed(samples) if s.distance_m is not None), None
     )
+    if total_distance is None and distance_series:
+        total_distance = next((d for d in reversed(distance_series) if d is not None), None)
     if total_distance is None and perf.locations:
         total_distance = next(
             (p.distance_m for p in reversed(perf.locations) if p.distance_m is not None), None
@@ -192,6 +236,12 @@ def _aggregate(perf: WorkoutPerformance | None) -> _Aggregates:
     total_calories = next(
         (s.calories for s in reversed(samples) if s.calories is not None), None
     )
+
+    if perf.summary is not None:
+        if perf.summary.total_distance_m is not None:
+            total_distance = perf.summary.total_distance_m
+        if perf.summary.total_calories is not None:
+            total_calories = perf.summary.total_calories
 
     def stats(attr: str) -> tuple[float | None, float | None]:
         values = [getattr(s, attr) for s in samples if getattr(s, attr) is not None]
@@ -202,15 +252,19 @@ def _aggregate(perf: WorkoutPerformance | None) -> _Aggregates:
     avg_power, max_power = stats("power")
     avg_heart_rate, max_heart_rate = stats("heart_rate")
     avg_cadence, max_cadence = stats("cadence")
+    avg_speed, max_speed = stats("speed_ms")
     return _Aggregates(
         total_distance=total_distance,
         total_calories=total_calories,
+        total_output_kj=perf.summary.total_output_kj if perf.summary else None,
         avg_power=avg_power,
         max_power=max_power,
         avg_heart_rate=avg_heart_rate,
         max_heart_rate=max_heart_rate,
         avg_cadence=avg_cadence,
         max_cadence=max_cadence,
+        avg_speed=avg_speed,
+        max_speed=max_speed,
     )
 
 
@@ -250,6 +304,12 @@ def _lap_message(
         lap.avg_cadence = round(agg.avg_cadence)
     if agg.max_cadence is not None:
         lap.max_cadence = round(agg.max_cadence)
+    if agg.avg_speed is not None:
+        lap.avg_speed = agg.avg_speed
+        lap.enhanced_avg_speed = agg.avg_speed
+    if agg.max_speed is not None:
+        lap.max_speed = agg.max_speed
+        lap.enhanced_max_speed = agg.max_speed
     return lap
 
 
@@ -292,10 +352,17 @@ def _session_message(
         session.avg_cadence = round(agg.avg_cadence)
     if agg.max_cadence is not None:
         session.max_cadence = round(agg.max_cadence)
+    if agg.avg_speed is not None:
+        session.avg_speed = agg.avg_speed
+        session.enhanced_avg_speed = agg.avg_speed
+    if agg.max_speed is not None:
+        session.max_speed = agg.max_speed
+        session.enhanced_max_speed = agg.max_speed
     if workout.ftp is not None:
         session.threshold_power = round(workout.ftp)
-    if workout.total_work is not None:
-        session.total_work = workout.total_work
+    total_work_kj = agg.total_output_kj if agg.total_output_kj is not None else workout.total_work
+    if total_work_kj is not None:
+        session.total_work = total_work_kj
     session.sport_profile_name = _profile_name(mapping.label, workout)
     return session
 
@@ -317,6 +384,35 @@ def _fit_epoch_local_seconds(ts_ms: int) -> int:
     offset = datetime.now(UTC).astimezone().utcoffset()
     offset_s = int(offset.total_seconds()) if offset else 0
     return (ts_ms // 1000 - offset_s - FIT_EPOCH_OFFSET_S) & 0xFFFFFFFF
+
+
+def _add_strength_structure(
+    builder: FitFileBuilder, plan: list[ExerciseBlock], start_ms: int
+) -> None:
+    """Emit per-exercise structure for strength sessions: one
+    ``exercise_title`` + one ``set`` message per class-plan block.
+
+    COROS derives muscle heatmaps by matching exercise names against its
+    library, so the names come straight from the Peloton class plan.
+    """
+    timestamp_ms = start_ms
+    for index, block in enumerate(plan):
+        title = ExerciseTitleMessage()
+        title.message_index = index
+        # fit_tool types exercise_name as a uint16 table index; the string
+        # field is workout_step_name — COROS/Garmin readers use the string.
+        title.workout_step_name = block.name
+        builder.add(title)
+
+        work = SetMessage()
+        work.message_index = index
+        work.timestamp = timestamp_ms
+        work.start_time = timestamp_ms
+        work.duration = block.duration_s * 1000  # ms
+        work.set_type = 1  # active
+        builder.add(work)
+
+        timestamp_ms += block.duration_s * 1000
 
 
 def _activity_message(end_ms: int, end_offset: int) -> ActivityMessage:

@@ -115,6 +115,14 @@ class ImportJob:
 
 
 @dataclass(frozen=True)
+class ActivityItem:
+    label_id: str
+    sport_type: int
+    start_time: int  # epoch seconds
+    name: str | None = None
+
+
+@dataclass(frozen=True)
 class UploadResult:
     import_id: str
     filename: str
@@ -328,13 +336,14 @@ class CorosClient:
         json_body: Any = None,
         token_header: str = "accessToken",
         authenticate: bool = True,
+        params: dict[str, str] | None = None,
     ) -> Any:
         headers = {"Content-Type": "application/json"}
         if authenticate:
             headers[token_header] = self.ensure_auth()
         try:
             response = self._http.request(
-                method, url, headers=headers, json=json_body, timeout=self._timeout
+                method, url, headers=headers, json=json_body, params=params, timeout=self._timeout
             )
         except requests.RequestException as exc:
             raise CorosHttpError(f"COROS request failed: {exc}") from exc
@@ -507,6 +516,50 @@ class CorosClient:
 
     def imported_filenames(self) -> set[str]:
         return {job.original_filename for job in self.import_jobs() if job.original_filename}
+
+    def list_activities(self, *, page: int = 1, size: int = 200) -> list[ActivityItem]:
+        """One page of activities (newest first)."""
+        data = self._api_post(
+            "activity/query", {"pageNumber": page, "size": size}
+        )
+        items: list[ActivityItem] = []
+        if not isinstance(data, dict):
+            return items
+        for raw in data.get("dataList") or []:
+            if not isinstance(raw, dict):
+                continue
+            label_id = raw.get("labelId")
+            if not label_id:
+                continue
+            items.append(
+                ActivityItem(
+                    label_id=str(label_id),
+                    sport_type=int(raw.get("sportType", 0) or 0),
+                    start_time=int(raw.get("startTime", 0) or 0),
+                    name=raw.get("name"),
+                )
+            )
+        return items
+
+    def all_activities(self) -> list[ActivityItem]:
+        """Every activity, following pagination (the API rate-limits; keep
+        page size at the 200 maximum)."""
+        out: list[ActivityItem] = []
+        page = 1
+        while True:
+            batch = self.list_activities(page=page)
+            out.extend(batch)
+            if len(batch) < 200:
+                return out
+            page += 1
+
+    def delete_activity(self, label_id: str) -> None:
+        """Delete an activity by labelId (succeeds whether or not it exists)."""
+        self._request(
+            "GET",
+            self.base_url + "/activity/delete",
+            params={"labelId": label_id},
+        )
 
     def wait_for_import(
         self, import_id: str, *, timeout_s: float, interval_s: float = 5.0

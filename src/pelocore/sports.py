@@ -24,6 +24,7 @@ DISCIPLINE_MAP: dict[str, SportMapping] = {
     "rowing": SportMapping(Sport.ROWING, SubSport.INDOOR_ROWING, "Rowing"),
     "strength": SportMapping(Sport.TRAINING, SubSport.STRENGTH_TRAINING, "Strength"),
     "yoga": SportMapping(Sport.TRAINING, SubSport.YOGA, "Yoga"),
+    "pilates": SportMapping(Sport.TRAINING, SubSport.PILATES, "Pilates"),
     "stretching": SportMapping(Sport.TRAINING, SubSport.FLEXIBILITY_TRAINING, "Stretching"),
     "meditation": SportMapping(Sport.MEDITATION, None, "Meditation"),
     "cardio": SportMapping(Sport.TRAINING, SubSport.CARDIO_TRAINING, "Cardio"),
@@ -37,9 +38,38 @@ DISCIPLINE_MAP: dict[str, SportMapping] = {
 
 DEFAULT_MAPPING = SportMapping(Sport.TRAINING, SubSport.GENERIC, "Training")
 
+#: Built-in discipline remaps for platform compatibility. COROS has no
+#: stretching activity type and buckets unknown TRAINING files into Strength,
+#: so stretching maps to Yoga — the closest supported category.
+BUILTIN_REMAPS: dict[str, str] = {
+    "stretching": "yoga",
+}
+
+
+def parse_remaps(raw: str) -> dict[str, str]:
+    """Parse ``"stretching=yoga,meditation=yoga"`` into a remap dict."""
+    remaps: dict[str, str] = {}
+    for pair in (raw or "").split(","):
+        pair = pair.strip()
+        if not pair:
+            continue
+        if "=" not in pair:
+            continue
+        source, target = pair.split("=", 1)
+        source, target = source.strip().lower(), target.strip().lower()
+        if source and target:
+            remaps[source] = target
+    return remaps
+
+
+def remap_discipline(fitness_discipline: str, extra: dict[str, str] | None = None) -> str:
+    """Apply built-in then user-configured remaps to a discipline name."""
+    remaps = {**BUILTIN_REMAPS, **(extra or {})}
+    return remaps.get(fitness_discipline.strip().lower(), fitness_discipline)
+
 
 def mapping_for(fitness_discipline: str, *, is_outdoor: bool = False) -> SportMapping:
-    """Resolve the FIT sport/subsport for a Peloton workout."""
+    """Resolve the FIT sport/subsport for a (possibly remapped) discipline."""
     name = fitness_discipline.strip().lower()
     base = DISCIPLINE_MAP.get(name, SportMapping(Sport.TRAINING, SubSport.GENERIC, "Training"))
     sub = base.sub_sport

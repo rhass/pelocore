@@ -375,8 +375,9 @@ def test_list_and_delete_activities() -> None:
         "https://teamapi.coros.com/account/login",
         json={"result": "0000", "message": "", "data": {"accessToken": "tok"}},
     )
-    responses.post(
+    responses.get(
         "https://teamapi.coros.com/activity/query",
+        match_querystring=False,
         json={
             "result": "0000",
             "message": "",

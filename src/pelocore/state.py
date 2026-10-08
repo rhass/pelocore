@@ -182,6 +182,11 @@ class StateStore:
         with self._lock:
             return self._workouts.get(workout_id)
 
+    def uploaded(self) -> dict[str, WorkoutRecord]:
+        """Records with status uploaded, keyed by workout id."""
+        with self._lock:
+            return {wid: rec for wid, rec in self._workouts.items() if rec.status == "uploaded"}
+
     def record_uploaded(
         self,
         workout_id: str,

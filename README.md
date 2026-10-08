@@ -100,14 +100,21 @@ until the constants in `src/pelocore/coros.py` are updated.
   `avg_speed`/`max_speed` (classic + enhanced fields) and per-record
   cumulative distance integrated from the speed series.
 - **`total_work`**: Peloton reports joules; FIT wants kJ — converted.
-- **Strength sessions**: Peloton strength workouts have no per-second data.
-  FIT files carry the class plan as `exercise_title` + `set` messages
-  (one per exercise block, named from the plan) plus session calories —
-  enough for COROS Training Load. Whether COROS renders the exercise list /
-  muscle heatmap for *imported* files is under observation: COROS computes
-  heatmaps by matching exercise names against its library, but its own
-  watch-export FITs do not contain muscle data at all (verified by parsing
-  a native export), so this may be a platform limitation.
+- **Strength / yoga / stretching**: Peloton strength workouts have no
+  per-second data. FIT files carry the class plan as `exercise_title` + `set`
+  messages (one per exercise block, named from the plan) plus session
+  calories. **COROS's importer categorizes imported files by primary sport
+  only** — anything with FIT sport `TRAINING` lands as Strength (402),
+  regardless of sub-sport (verified: yoga/stretching imports with YOGA
+  sub-sport still import as Strength), and the muscle heatmap is not
+  available for imported activities (COROS derives it server-side from its
+  own plan structure; a native watch export contains no muscle data).
+- **Training Load needs heart rate**: imported strength/yoga/stretching
+  without HR data gets `trainingLoad = 0` in COROS. Peloton captures HR
+  when you wear a monitor — it flows through to the FIT (session
+  avg/max HR and per-second records), and COROS then computes a nonzero
+  load. Wear the strap for strength and pilates classes if Training Load
+  matters to you.
 - Peloton `muscle_group_score` (per-muscle percentages) is available in the
   API but has no standard FIT representation; it is not written today.
 

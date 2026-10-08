@@ -316,8 +316,8 @@ class CorosClient:
 
     # -- low-level request helpers ------------------------------------------
 
-    def _api_get(self, path: str) -> dict[str, Any]:
-        data = self._request("GET", self.base_url + "/" + path)
+    def _api_get(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
+        data = self._request("GET", self.base_url + "/" + path, params=params)
         return data if isinstance(data, dict) else {}
 
     def _api_post(self, path: str, body: Any, *, token_header: str = "accessToken") -> Any:
@@ -517,10 +517,23 @@ class CorosClient:
     def imported_filenames(self) -> set[str]:
         return {job.original_filename for job in self.import_jobs() if job.original_filename}
 
-    def list_activities(self, *, page: int = 1, size: int = 200) -> list[ActivityItem]:
-        """One page of activities (newest first)."""
-        data = self._api_post(
-            "activity/query", {"pageNumber": page, "size": size}
+    def list_activities(
+        self,
+        *,
+        page: int = 1,
+        size: int = 50,
+        start_day: str | None = None,
+        end_day: str | None = None,
+    ) -> list[ActivityItem]:
+        """One page of activities (newest first). ``start_day``/``end_day``
+        are YYYYMMDD strings; an unbounded query is rejected by the API."""
+        params: dict[str, str] = {"pageNumber": str(page), "size": str(size)}
+        if start_day:
+            params["startDay"] = start_day
+        if end_day:
+            params["endDay"] = end_day
+        data = self._request(
+            "GET", self.base_url + "/activity/query", params=params
         )
         items: list[ActivityItem] = []
         if not isinstance(data, dict):
@@ -541,15 +554,18 @@ class CorosClient:
             )
         return items
 
-    def all_activities(self) -> list[ActivityItem]:
-        """Every activity, following pagination (the API rate-limits; keep
-        page size at the 200 maximum)."""
+    def all_activities(
+        self, *, start_day: str | None = None, end_day: str | None = None
+    ) -> list[ActivityItem]:
+        """Every activity in range, following pagination."""
         out: list[ActivityItem] = []
         page = 1
         while True:
-            batch = self.list_activities(page=page)
+            batch = self.list_activities(
+                page=page, start_day=start_day, end_day=end_day
+            )
             out.extend(batch)
-            if len(batch) < 200:
+            if len(batch) < 50:
                 return out
             page += 1
 
@@ -560,6 +576,10 @@ class CorosClient:
             self.base_url + "/activity/delete",
             params={"labelId": label_id},
         )
+
+    def remove_from_import_list(self, import_id: str) -> None:
+        """Remove an entry from the import list (post-delete cleanup)."""
+        self._api_post("activity/fit/deleteSportImport", {"importId": import_id})
 
     def wait_for_import(
         self, import_id: str, *, timeout_s: float, interval_s: float = 5.0

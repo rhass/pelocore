@@ -164,9 +164,17 @@ def _header(data: bytes) -> dict[str, Any]:
 def _decode_value(
     chunk: bytes, base_type: int, big_endian: bool
 ) -> Any:
-    name, _size = BASE_TYPES.get(base_type & 0x1F, ("byte", len(chunk)))
+    """Decode by base type; tolerate undersized vendor encodings.
+
+    COROS exports declare fields with sizes that do not match their base
+    type (e.g. a uint32 with size 1); anything undecodable comes back as
+    hex instead of raising.
+    """
+    name, type_size = BASE_TYPES.get(base_type & 0x1F, ("byte", len(chunk)))
     if chunk and all(byte == 0xFF for byte in chunk):
         return None
+    if len(chunk) < type_size and name != "string":
+        return chunk.hex()
     endian = ">" if big_endian else "<"
     if name == "string":
         return chunk.split(b"\x00")[0].decode("utf-8", "replace")

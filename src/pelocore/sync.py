@@ -10,7 +10,13 @@ from typing import Protocol
 from pelocore.config import Settings
 from pelocore.coros import ActivityItem, CorosAmbiguousMatchError, ImportJob, UploadResult
 from pelocore.fitbuild import CONVERTER_VERSION, FitBuildResult, build_activity_fit
-from pelocore.peloton import ExerciseBlock, PelotonSource, PelotonWorkout, display_name
+from pelocore.peloton import (
+    ExerciseBlock,
+    PelotonSource,
+    PelotonWorkout,
+    display_name,
+    resolve_display_name,
+)
 from pelocore.sports import coros_sport_code, parse_remaps
 from pelocore.state import CycleError, CycleReport, StateStore
 
@@ -102,8 +108,9 @@ class SyncEngine:
             report.skipped += 1
             self._finish(report)
             return report
-        built = self._hydrate(workout, report)
-        if built is not None:
+        hydrated = self._hydrate(workout, report)
+        if hydrated is not None:
+            workout, built = hydrated
             self._upload(workout, built.data, report)
         report.outcome = "ok" if report.failed == 0 else "failed"
         self._finish(report)
@@ -164,11 +171,21 @@ class SyncEngine:
         # data and build the FIT files before touching COROS, so Peloton-side
         # failures never leave a half-synced batch.
         hydrated: list[tuple[str, PelotonWorkout, bytes, int]] = []
-        for decision, workout, recorded in actions:
-            built = self._hydrate(workout, report)
-            if built is not None:
+        actions.sort(key=lambda item: item[1].start_time)  # oldest first
+        for index, (decision, workout, recorded) in enumerate(actions, start=1):
+            hydrated_workout = self._hydrate(workout, report)
+            if hydrated_workout is not None:
+                workout, built = hydrated_workout
+                logger.info(
+                    "hydrated %d/%d: %s (%s) - %d records",
+                    index,
+                    len(actions),
+                    workout.id[:8],
+                    display_name(workout.title, workout.instructor),
+                    built.record_count,
+                )
                 hydrated.append((decision, workout, built.data, recorded))
-        hydrated.sort(key=lambda item: item[1].start_time)  # oldest first
+
 
         # Phase 2: upload the fully hydrated batch to COROS, in chunks with
         # delays between them (backfill pacing; off by default).
@@ -319,9 +336,10 @@ class SyncEngine:
 
     def _hydrate(
         self, workout: PelotonWorkout, report: CycleReport
-    ) -> FitBuildResult | None:
+    ) -> tuple[PelotonWorkout, FitBuildResult] | None:
         """Fetch performance data (and the class plan for strength) and build
-        the FIT file; None on failure."""
+        the FIT file. Returns the detail-normalized workout (carrying the
+        class title and instructor) alongside the result; None on failure."""
         try:
             detail = self._peloton.workout_by_id(workout.id)
             if detail is not None:
@@ -339,7 +357,7 @@ class SyncEngine:
                 workout.title,
                 built.record_count,
             )
-            return built
+            return workout, built
         except Exception as exc:
             self._record_error(
                 workout, str(exc) or exc.__class__.__name__, report, source="peloton"
@@ -411,14 +429,7 @@ class SyncEngine:
             if not rec.start_time:
                 logger.warning("no start_time recorded for %s; skipping", workout_id)
                 continue
-            name = display_name(rec.title, rec.instructor)
-            try:
-                detail = self._peloton.workout_by_id(workout_id)
-            except Exception as exc:
-                logger.warning("could not refresh title for %s: %s", workout_id, exc)
-                detail = None
-            if detail is not None:
-                name = display_name(detail.title, detail.instructor)
+            name = resolve_display_name(self._peloton, workout_id, fallback=rec.title)
             try:
                 done = self._coros.rename_after_import(
                     rec.start_time,

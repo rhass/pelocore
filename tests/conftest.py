@@ -38,12 +38,14 @@ class FakePeloton:
         workouts: list[PelotonWorkout] | None = None,
         performances: dict[str, WorkoutPerformance] | None = None,
         plans: dict[str, list[ExerciseBlock]] | None = None,
+        details: dict[str, PelotonWorkout] | None = None,
         list_error: Exception | None = None,
         perf_error: Exception | None = None,
     ):
         self.workouts = list(workouts or [])
         self.performances = dict(performances or {})
         self.plans = dict(plans or {})
+        self.details = dict(details or {})
         self.list_error = list_error
         self.perf_error = perf_error
 
@@ -53,6 +55,8 @@ class FakePeloton:
         return list(self.workouts)
 
     def workout_by_id(self, workout_id: str) -> PelotonWorkout | None:
+        if workout_id in self.details:
+            return self.details[workout_id]
         return next((w for w in self.workouts if w.id == workout_id), None)
 
     def class_plan(self, ride_id: str) -> list[ExerciseBlock]:

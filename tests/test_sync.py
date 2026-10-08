@@ -451,3 +451,64 @@ def test_no_pacing_by_default(
     )
     SyncEngine(peloton, FakeCoros(), store, settings).run_cycle()
     assert sleeps == []
+
+
+def test_detail_title_flows_to_rename(
+    store: StateStore, settings: Settings
+) -> None:
+    """The rename bug: hydration resolves the real class title from the
+    detail payload, but the rename used the list payload's generic name.
+    The detail workout must flow through to the rename."""
+    list_workout = make_workout("w1", title="Cycling Workout", instructor=None)
+    detail_workout = make_workout(
+        "w1", title="45 min Intervals & Arms Ride", instructor="Kendall Toole"
+    )
+    peloton = FakePeloton(
+        workouts=[list_workout],
+        performances={"w1": cycling_performance()},
+        details={"w1": detail_workout},
+    )
+    coros = FakeCoros()
+    engine = SyncEngine(peloton, coros, store, settings)
+    report = engine.run_cycle()
+
+    assert report.uploaded == 1
+    # renamed to the DETAIL title, not the generic list title
+    assert coros.renames == [
+        (
+            1_700_000_000,
+            201,
+            "45 min Intervals & Arms Ride with Kendall Toole",
+        )
+    ]
+
+
+def test_rename_uploaded_uses_shared_resolution(
+    store: StateStore, settings: Settings
+) -> None:
+    list_workout = make_workout("w1", title="Cycling Workout", instructor=None)
+    detail_workout = make_workout(
+        "w1", title="45 min Intervals & Arms Ride", instructor="Kendall Toole"
+    )
+    peloton = FakePeloton(
+        workouts=[list_workout],
+        performances={"w1": cycling_performance()},
+        details={"w1": detail_workout},
+    )
+    coros = FakeCoros()
+    store.record_uploaded(
+        "w1",
+        md5="m",
+        import_id="j",
+        fit_filename=fit_filename("w1"),
+        title="Cycling Workout",
+        instructor=None,
+        discipline="cycling",
+        start_time=1_700_000_000,
+    )
+    engine = SyncEngine(peloton, coros, store, settings)
+    renamed = engine.rename_uploaded()
+    assert renamed == 1
+    assert coros.renames == [
+        (1_700_000_000, 201, "45 min Intervals & Arms Ride with Kendall Toole")
+    ]

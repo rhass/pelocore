@@ -107,6 +107,22 @@ class PelotonSource(Protocol):
     def class_plan(self, ride_id: str) -> list[ExerciseBlock]: ...
 
 
+def resolve_display_name(
+    client: PelotonSource, workout_id: str, fallback: str | None = None
+) -> str:
+    """Authoritative COROS display name: the detail payload's title +
+    instructor. Single implementation shared by the sync rename path and
+    the retroactive rename; falls back to ``fallback`` (e.g. the state
+    record title) when the detail fetch fails."""
+    try:
+        workout = client.workout_by_id(workout_id)
+    except Exception:
+        workout = None
+    if workout is None:
+        return display_name(fallback, None)
+    return display_name(workout.title, workout.instructor)
+
+
 def parse_performance(pg: dict[str, Any]) -> WorkoutPerformance:
     """Normalize a Peloton ``performance_graph`` payload.
 

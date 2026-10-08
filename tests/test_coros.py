@@ -529,3 +529,68 @@ def test_rename_after_import_ambiguous_is_skipped() -> None:
     client = CorosClient(region="en", access_token="t")
     done = client.rename_after_import(1791300561, 201, "Ride", timeout_s=2, interval_s=0)
     assert not done
+
+
+@responses.activate
+def test_request_relogins_once_on_401() -> None:
+    responses.post(
+        "https://teamapi.coros.com/account/login",
+        json={"result": "0000", "message": "", "data": {"accessToken": "fresh"}},
+    )
+    calls_seen: list[str] = []
+
+    def handler(req: Any, **kwargs: Any) -> tuple[int, dict[str, str], str]:
+        calls_seen.append(req.headers.get("accessToken") or "")
+        if len(calls_seen) == 1:
+            return (401, {}, json.dumps({"result": "8100", "message": "unauthorized"}))
+        return (200, {}, json.dumps({"result": "0000", "message": "", "data": {"userId": "u1"}}))
+
+    responses.add_callback(
+        responses.GET,
+        "https://teamapi.coros.com/account/query",
+        callback=handler,
+    )
+    client = CorosClient(
+        region="en", email="e@example.com", password="p", access_token="stale"
+    )
+    account = client.account()
+    assert account.user_id == "u1"
+    assert calls_seen == ["stale", "fresh"]
+
+
+@responses.activate
+def test_sts_relogins_once_on_401() -> None:
+    logins = iter(["tok", "fresh"])
+    responses.add_callback(
+        responses.POST,
+        "https://teamapi.coros.com/account/login",
+        callback=lambda req: (
+            200,
+            {},
+            json.dumps({"result": "0000", "message": "", "data": {"accessToken": next(logins)}}),
+        ),
+    )
+    sts_cookies: list[str] = []
+
+    def sts_handler(req: Any, **kwargs: Any) -> tuple[int, dict[str, str], str]:
+        sts_cookies.append(req.headers.get("Cookie") or "")
+        if len(sts_cookies) == 1:
+            return (401, {}, json.dumps({"code": 401, "msg": "unauthorized"}))
+        return (200, {}, json.dumps(_sts_response(CRED_S3)))
+
+    responses.add_callback(
+        responses.GET,
+        "https://training.coros.com/api/proxy/oss/sts",
+        callback=sts_handler,
+        match_querystring=False,
+    )
+    responses.get(
+        "https://teamapi.coros.com/account/query",
+        json={"result": "0000", "message": "", "data": {"userId": "u1"}},
+    )
+    creds = _client()._sts_credentials()
+    assert creds.bucket == "coros-s3"
+    assert sts_cookies == [
+        "CPL-coros-token=tok",
+        "CPL-coros-token=fresh",
+    ]

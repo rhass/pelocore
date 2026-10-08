@@ -361,6 +361,21 @@ class CorosClient:
             )
         except requests.RequestException as exc:
             raise CorosHttpError(f"COROS request failed: {exc}") from exc
+        if response.status_code == 401 and authenticate:
+            # The session token was invalidated (e.g. expired or the account
+            # signed in elsewhere); re-login once and retry.
+            logger.warning("COROS 401 from %s; re-logging in and retrying", url)
+            self._token = None
+            self.ensure_auth()
+            headers[token_header] = self._token or ""
+            type(self).api_calls += 1
+            try:
+                response = self._http.request(
+                    method, url, headers=headers, json=json_body, params=params,
+                    timeout=self._timeout,
+                )
+            except requests.RequestException as exc:
+                raise CorosHttpError(f"COROS request failed: {exc}") from exc
         return _parse_envelope(response, url)
 
     # -- STS + S3 upload ----------------------------------------------------
@@ -386,6 +401,20 @@ class CorosClient:
                 timeout=self._timeout,
             )
             creds = _parse_sts_response(response, proxy_url)
+            if creds is None and response.status_code == 401:
+                logger.warning("STS proxy 401; re-logging in and retrying once")
+                self._token = None
+                self.ensure_auth()
+                type(self).api_calls += 1
+                response = self._http.get(
+                    proxy_url,
+                    headers={
+                        "Accept": "application/json",
+                        "Cookie": f"CPL-coros-token={self._token}",
+                    },
+                    timeout=self._timeout,
+                )
+                creds = _parse_sts_response(response, proxy_url)
             if creds is not None:
                 return creds
             errors.append(f"web-proxy: HTTP {response.status_code} {response.text[:120]}")
@@ -418,7 +447,15 @@ class CorosClient:
 
         raise CorosHttpError("STS failed on all channels: " + " | ".join(errors))
 
-    def _s3_put(self, creds: S3Credentials, key: str, body: bytes) -> None:
+    def _s3_put(
+        self,
+        creds: S3Credentials,
+        key: str,
+        body: bytes,
+        *,
+        retry_with_fresh_sts: bool = True,
+    ) -> None:
+        """PUT the zip to S3 with SigV4; refreshes STS credentials once on 401."""
         host = f"{creds.bucket}.s3.{creds.region}.amazonaws.com"
         url = f"https://{host}/{_uri_encode(key)}"
         amz_date = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -445,6 +482,12 @@ class CorosClient:
             raise CorosHttpError(f"S3 PUT failed: {exc}") from exc
         if response.status_code >= 400:
             text = response.text[:200]
+            if response.status_code == 401 and retry_with_fresh_sts:
+                # STS credentials expired or were revoked; refresh once.
+                logger.warning("S3 PUT 401; refreshing STS credentials and retrying once")
+                fresh = self._sts_credentials()
+                self._s3_put(fresh, key, body, retry_with_fresh_sts=False)
+                return
             raise CorosHttpError(f"S3 PUT failed: HTTP {response.status_code} {text}")
 
     def _register_import(

@@ -52,6 +52,8 @@ def build_activity_fit(
     *,
     plan: list[ExerciseBlock] | None = None,
     remaps: dict[str, str] | None = None,
+    manufacturer: int | None = None,
+    product: int | None = None,
 ) -> FitBuildResult:
     effective = remap_discipline(workout.fitness_discipline, remaps)
     mapping = mapping_for(effective, is_outdoor=workout.is_outdoor)
@@ -63,8 +65,8 @@ def build_activity_fit(
 
     file_id = FileIdMessage()
     file_id.type = FileType.ACTIVITY
-    file_id.manufacturer = Manufacturer.DEVELOPMENT
-    file_id.product = 0
+    file_id.manufacturer = manufacturer if manufacturer is not None else Manufacturer.DEVELOPMENT
+    file_id.product = product if product is not None else 0
     file_id.serial_number = _serial_number(workout.id)
     file_id.time_created = end_ms
     builder.add(file_id)

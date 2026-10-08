@@ -106,7 +106,18 @@ docstrings of `coros.py` and `peloton.py`. Non-obvious traps:
   polling `activity/query` and matching start time.
 - `activity/query` is a GET with query params (POST yields "Service
   exceptions") and rejects unbounded queries; scope it with
-  `startDay`/`endDay` (YYYYMMDD).
+  `startDay`/`endDay` (YYYYMMDD). Unscoped queries can also return stale
+  partial results: freshly imported activities may be invisible to them.
+  Always scope.
+- The import pipeline is md5-keyed: uploading identical FIT bytes twice
+  returns the same import job id and creates no second activity (verified
+  experimentally, `scripts/experiment_subsport.py`). Import-list entries
+  are retained for many months, making stateless (no-volume) operation
+  safe; a lost state file costs wasted uploads, never duplicates.
+- Manufacturer spoofing (file_id manufacturer 294 / product 822, matching
+  COROS hardware) does NOT change import categorization; yoga with sub-sport
+  still lands as Strength. Primary-sport categorization is a server-side
+  rule.
 
 ### Peloton
 

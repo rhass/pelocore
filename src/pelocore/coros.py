@@ -23,7 +23,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
 
@@ -529,12 +529,20 @@ class CorosClient:
         end_day: str | None = None,
     ) -> list[ActivityItem]:
         """One page of activities (newest first). ``start_day``/``end_day``
-        are YYYYMMDD strings; an unbounded query is rejected by the API."""
+        are YYYYMMDD strings.
+
+        Always scope the query: an unbounded GET is both rejected in some
+        shapes and, worse, observed to return stale partial results, which
+        once made freshly imported activities invisible. Scoping is cheap
+        and reliable.
+        """
         params: dict[str, str] = {"pageNumber": str(page), "size": str(size)}
-        if start_day:
-            params["startDay"] = start_day
-        if end_day:
-            params["endDay"] = end_day
+        if start_day is None or end_day is None:
+            now = datetime.now(UTC)
+            end_day = end_day or now.strftime("%Y%m%d")
+            start_day = start_day or (now - timedelta(days=7)).strftime("%Y%m%d")
+        params["startDay"] = start_day
+        params["endDay"] = end_day
         data = self._request(
             "GET", self.base_url + "/activity/query", params=params
         )
@@ -626,9 +634,14 @@ class CorosClient:
         while True:
             hinted: dict[str, ActivityItem] = {}
             time_only: dict[str, ActivityItem] = {}
+            window_day = datetime.fromtimestamp(start_time, tz=UTC)
+            start_day = (window_day - timedelta(days=1)).strftime("%Y%m%d")
+            end_day = (window_day + timedelta(days=1)).strftime("%Y%m%d")
             for page in (1, 2):
                 try:
-                    activities = self.list_activities(page=page, size=50)
+                    activities = self.list_activities(
+                        page=page, size=50, start_day=start_day, end_day=end_day
+                    )
                 except CorosError as exc:
                     logger.debug("activity query failed during rename: %s", exc)
                     continue

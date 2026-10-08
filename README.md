@@ -99,6 +99,14 @@ until the constants in `src/pelocore/coros.py` are updated.
   ("Indoor Bike", "Strength"). pelocore renames activities to their Peloton
   titles after import via `POST /activity/update`; `pelocore rename` fixes
   any state-tracked activities retroactively.
+- **Content dedupe**: the COROS import pipeline is keyed by file md5 -
+  uploading identical FIT bytes twice yields the same import job and no
+  second activity (verified experimentally). This is what makes stateless
+  operation safe: a lost state file only ever causes wasted uploads, never
+  duplicates.
+- **Query scoping**: `activity/query` must be scoped with
+  `startDay`/`endDay`; unbounded queries can return stale partial results
+  (which once made fresh imports invisible). pelocore scopes everything.
 - **Cycling distance/speed**: Peloton reports speed per second and distance
   only in the performance-graph summaries (there is no per-second distance
   series for rides). pelocore writes both - session `total_distance`,
@@ -140,6 +148,23 @@ compute Training Load for strength, yoga and stretching imports (and gives
 cycling/running their full HR metrics).
 - Peloton `muscle_group_score` (per-muscle percentages) is available in the
   API but has no standard FIT representation; it is not written today.
+
+## Stateless operation
+
+`pelocore sync` (cron mode) needs no state at all: dedupe runs against the
+COROS import list (server-side, retained for many months) and the import
+pipeline itself is md5-keyed, so even a re-upload of identical bytes cannot
+create a duplicate activity. The shipped `cronjob.yaml` mounts no volume
+and every run starts from scratch.
+
+- **k8s CronJob**: the default stateless shape (`deploy/k8s/cronjob.yaml`).
+- **Serverless** (Cloud Run Jobs, etc.): works the same way; tune
+  `PELOCORE_IMPORT_POLL_SECONDS` down if per-invocation time is capped,
+  since polling (import + rename resolution) dominates runtime. AWS Lambda's
+  15-minute cap fits small backfills only.
+- **Deployment with status page**: state.json adds cycle history for the
+  status page and skips already-known workouts (fewer API calls), but is
+  never required for correctness.
 
 ## Kubernetes
 

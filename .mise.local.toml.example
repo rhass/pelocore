@@ -2,27 +2,88 @@
 #
 # Local, personal configuration. Copy to `.mise.local.toml` (mise auto-loads it
 # after mise.toml; both are git-ignored) and fill in what you need.
+#
+# ---------------------------------------------------------------------------
+# SECRETS: two supported patterns
+# ---------------------------------------------------------------------------
+#
+# 1. 1Password secret references (recommended)
+#
+#    Install the 1Password CLI through mise and add the tool to this file:
+#
+#        mise use 1password        # adds [tools] 1password = "latest" here
+#        op signin                 # or sign in via the 1Password desktop app
+#
+#    Then set env values to `op://` references. `op run --` resolves every
+#    value that starts with `op://` and injects the real secret into the
+#    child process — the reference never touches disk or shell history:
+#
+#        PELOTON_PASSWORD = "op://Private/pelocore/peloton-password"
+#
+#    Wrap the commands you run with `op run --`. The [tasks] overrides at the
+#    bottom of this file do exactly that (mise start, mise run-sync, ...).
+#
+# 2. Plain values (quick and dirty)
+#
+#    Put real values straight into this file. It is git-ignored, but secrets
+#    still land on disk in plaintext — prefer 1Password references.
+#
+# ---------------------------------------------------------------------------
+
+[tools]
+# 1Password CLI (`op`) — required for the `op run --` task overrides below.
+# `mise use 1password` adds this line for you.
+1password = "latest"
 
 [env]
 # --- Docker Hardened Images base (optional) -------------------------------
 # Release CI reads these from repo secrets (DOCKERHUB_USERNAME/DOCKERHUB_TOKEN).
-# Locally they are only needed if you want to build with the dhi.io base:
+# Locally they are only needed to build with the dhi.io base:
 #   mise run docker-build-with-dhi   (or: docker build --build-arg BASE_IMAGE=dhi.io/python:3.13 .)
-DOCKERHUB_USERNAME = ""
-DOCKERHUB_TOKEN = ""
+DOCKERHUB_USERNAME = ""            # or "op://Private/dockerhub/username"
+DOCKERHUB_TOKEN = ""               # or "op://Private/dockerhub/token"
 
-# --- Real credentials for doctor / live smoke tests ------------------------
-# Used by `pelocore doctor`, `pelocore sync`, and PELOCORE_LIVE=1 pytest runs.
-PELOTON_USERNAME = ""
-PELOTON_PASSWORD = ""
-PELOTON_REFRESH_TOKEN = ""
-COROS_EMAIL = ""
-COROS_PASSWORD = ""
-COROS_ACCESS_TOKEN = ""
+# --- Peloton credentials ----------------------------------------------------
+# Reference format: op://<vault>/<item>/<field>
+PELOTON_USERNAME = ""              # or "op://Private/pelocore/peloton-username"
+PELOTON_PASSWORD = ""              # or "op://Private/pelocore/peloton-password"
+PELOTON_REFRESH_TOKEN = ""         # alternative to PELOTON_PASSWORD
+
+# --- COROS credentials ------------------------------------------------------
+COROS_EMAIL = ""                   # or "op://Private/pelocore/coros-email"
+COROS_PASSWORD = ""                # or "op://Private/pelocore/coros-password"
+COROS_ACCESS_TOKEN = ""            # browser session token; skips password login
 COROS_REGION = "en"
 
+# --- Misc -------------------------------------------------------------------
 # Set to "1" to enable live tests: PELOCORE_LIVE=1 mise exec -- uv run pytest -m live
 PELOCORE_LIVE = "0"
+# The status server binds 8080 by default; pick another port if it is taken.
+# PELOCORE_SERVER_PORT = "8082"
+
+# ---------------------------------------------------------------------------
+# Task overrides wrapping with `op run --`
+#
+# These replace/extend the repo tasks so every pelocore invocation resolves
+# the op:// references above. If a command fails with "account not signed in",
+# run `op signin` first (or enable biometric unlock in the 1Password app).
+# ---------------------------------------------------------------------------
+
+[tasks.start]
+description = "Run the bridge (loop mode) with 1Password secrets"
+run = "op run -- uv run pelocore run"
+
+[tasks.run-sync]
+description = "One-shot sync with 1Password secrets"
+run = "op run -- uv run pelocore sync"
+
+[tasks.run-doctor]
+description = "Check Peloton + COROS credentials with 1Password secrets"
+run = "op run -- uv run pelocore doctor"
+
+[tasks.run-status]
+description = "Print sync history from the state file"
+run = "uv run pelocore status"
 
 [tasks.docker-build-with-dhi]
 description = "Build the container image on the hardened DHI base"

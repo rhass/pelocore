@@ -193,6 +193,40 @@ locally: keyless cosign signing (needs GitHub's OIDC provider), GHCR push,
 and the SARIF upload to the code-scanning API (needs `GITHUB_TOKEN` with
 `security_events` scope) — those steps stay in real CI.
 
+### Secrets via 1Password
+
+Local credentials live in `.mise.local.toml` (git-ignored; see
+[.mise.local.toml.example](.mise.local.toml.example)). The recommended
+pattern uses 1Password secret references instead of plaintext values:
+
+1. Add the 1Password CLI to the toolchain and sign in:
+
+   ```console
+   $ mise use 1password      # adds [tools] 1password = "latest" (to your local toml)
+   $ op signin               # or unlock via the 1Password desktop app
+   ```
+
+2. Point env values at vault items — `op://<vault>/<item>/<field>`:
+
+   ```toml
+   [env]
+   PELOTON_PASSWORD = "op://Private/pelocore/peloton-password"
+   COROS_PASSWORD = "op://Private/pelocore/coros-password"
+   ```
+
+3. Wrap commands with `op run --`, which resolves every `op://` reference in
+   the environment for the child process. The template ships task overrides
+   for this (`mise start`, `mise run-sync`, `mise run-doctor`):
+
+   ```toml
+   [tasks.start]
+   run = "op run -- uv run pelocore run"
+   ```
+
+Secrets resolved by `op run --` exist only in the child process environment —
+references never touch disk or shell history. Plain values also work in
+`.mise.local.toml` but are stored in plaintext; prefer references.
+
 ## Security notes
 
 - Trivy scans run on every PR (filesystem: dependency vulns via `uv.lock` +

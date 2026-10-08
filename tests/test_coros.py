@@ -401,3 +401,131 @@ def test_list_and_delete_activities() -> None:
     client.delete_activity("L1")
     del_call = next(c for c in responses.calls if "activity/delete" in (c.request.url or ""))
     assert "labelId=L1" in (del_call.request.url or "")
+
+
+@responses.activate
+def test_rename_activity_payload_and_headers() -> None:
+    responses.post(
+        "https://teamapi.coros.com/account/login",
+        json={"result": "0000", "message": "", "data": {"accessToken": "tok"}},
+    )
+    responses.get(
+        "https://teamapi.coros.com/account/query",
+        json={"result": "0000", "message": "", "data": {"userId": "u9"}},
+    )
+    responses.post(
+        "https://teamapi.coros.com/activity/update",
+        json={"result": "0000", "message": "OK"},
+    )
+    client = CorosClient(region="en", access_token="t")
+    client.rename_activity("L42", "Metal Full Body Strength")
+
+    call = next(c for c in responses.calls if "activity/update" in (c.request.url or ""))
+    assert call.request.headers["accesstoken"] == "t"
+    assert '"userId": "u9"' in call.request.headers["yfheader"]
+    body = call.request.body or ""
+    assert '"type": 1' in body and '"labelId": "L42"' in body
+    assert '"name": "Metal Full Body Strength"' in body
+
+
+@responses.activate
+def test_rename_after_import_polls_then_renames() -> None:
+    responses.post(
+        "https://teamapi.coros.com/account/login",
+        json={"result": "0000", "message": "", "data": {"accessToken": "tok"}},
+    )
+    responses.get(
+        "https://teamapi.coros.com/account/query",
+        json={"result": "0000", "message": "", "data": {"userId": "u9"}},
+    )
+    responses.get(
+        "https://teamapi.coros.com/activity/query",
+        match_querystring=False,
+        json={
+            "result": "0000",
+            "message": "",
+            "data": {
+                "dataList": [
+                    {"labelId": "L1", "sportType": 201, "startTime": 1791300560},
+                    {"labelId": "L2", "sportType": 402, "startTime": 1791300590},
+                ],
+                "totalPage": 1,
+            },
+        },
+    )
+    responses.post(
+        "https://teamapi.coros.com/activity/update",
+        json={"result": "0000", "message": "OK"},
+    )
+    client = CorosClient(region="en", access_token="t")
+    done = client.rename_after_import(1791300561, 201, "Low Impact Ride", timeout_s=2, interval_s=0)
+    assert done
+    update_calls = [c for c in responses.calls if "activity/update" in (c.request.url or "")]
+    assert len(update_calls) == 1
+    assert '"labelId": "L1"' in (update_calls[0].request.body or "")
+
+
+@responses.activate
+def test_rename_after_import_unique_time_match_fallback() -> None:
+    """When nothing matches the sport hint, a single unambiguous time
+    candidate is still renamed (the importer may file under another sport)."""
+    responses.post(
+        "https://teamapi.coros.com/account/login",
+        json={"result": "0000", "message": "", "data": {"accessToken": "tok"}},
+    )
+    responses.get(
+        "https://teamapi.coros.com/account/query",
+        json={"result": "0000", "message": "", "data": {"userId": "u9"}},
+    )
+    responses.get(
+        "https://teamapi.coros.com/activity/query",
+        match_querystring=False,
+        json={
+            "result": "0000",
+            "message": "",
+            "data": {
+                "dataList": [
+                    {"labelId": "L9", "sportType": 402, "startTime": 1790958823},
+                ],
+                "totalPage": 1,
+            },
+        },
+    )
+    responses.post(
+        "https://teamapi.coros.com/activity/update",
+        json={"result": "0000", "message": "OK"},
+    )
+    client = CorosClient(region="en", access_token="t")
+    # hint 904 (yoga) matches nothing; the single 402 activity wins on time
+    done = client.rename_after_import(1790958823, 904, "Yoga Workout", timeout_s=2, interval_s=0)
+    assert done
+
+
+@responses.activate
+def test_rename_after_import_ambiguous_is_skipped() -> None:
+    responses.post(
+        "https://teamapi.coros.com/account/login",
+        json={"result": "0000", "message": "", "data": {"accessToken": "tok"}},
+    )
+    responses.get(
+        "https://teamapi.coros.com/account/query",
+        json={"result": "0000", "message": "", "data": {"userId": "u9"}},
+    )
+    responses.get(
+        "https://teamapi.coros.com/activity/query",
+        match_querystring=False,
+        json={
+            "result": "0000",
+            "message": "",
+            "data": {
+                "dataList": [
+                    {"labelId": "A", "sportType": 201, "startTime": 1791300560},
+                    {"labelId": "B", "sportType": 201, "startTime": 1791300590},
+                ],
+                "totalPage": 1,
+            },
+        },
+    )
+    client = CorosClient(region="en", access_token="t")
+    done = client.rename_after_import(1791300561, 201, "Ride", timeout_s=2, interval_s=0)
+    assert not done

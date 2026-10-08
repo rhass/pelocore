@@ -80,3 +80,30 @@ def mapping_for(fitness_discipline: str, *, is_outdoor: bool = False) -> SportMa
     elif name == "cycling" and is_outdoor:
         sub = None  # outdoor cycling: leave sub-sport unset
     return SportMapping(base.sport, sub, base.label)
+
+
+#: (FIT Sport name, FIT SubSport name or None) -> COROS activity/query
+#: ``sportType`` codes. None sub-sport matches any sub-sport first.
+COROS_SPORT_CODES: dict[tuple[str, str | None], int] = {
+    ("CYCLING", "INDOOR_CYCLING"): 201,
+    ("CYCLING", None): 200,
+    ("RUNNING", "TREADMILL"): 101,
+    ("RUNNING", None): 100,
+    ("ROWING", "INDOOR_ROWING"): 701,
+    ("ROWING", None): 700,
+    ("TRAINING", "STRENGTH_TRAINING"): 402,
+    ("TRAINING", "YOGA"): 904,
+    ("TRAINING", "PILATES"): 905,
+    ("WALKING", None): 900,
+    ("WALKING", "INDOOR_WALKING"): 900,
+}
+
+
+def coros_sport_code(fitness_discipline: str, *, is_outdoor: bool = False) -> int | None:
+    """COROS ``sportType`` code for a discipline, or None when unknown."""
+    mapping = mapping_for(fitness_discipline, is_outdoor=is_outdoor)
+    sub = mapping.sub_sport.name if mapping.sub_sport else None
+    exact = COROS_SPORT_CODES.get((mapping.sport.name, sub))
+    if exact is not None:
+        return exact
+    return COROS_SPORT_CODES.get((mapping.sport.name, None))

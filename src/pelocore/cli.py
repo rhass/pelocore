@@ -53,6 +53,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     subparsers.add_parser("run", help="run the loop server with the status page")
     subparsers.add_parser("status", help="print recent sync history from the state file")
     subparsers.add_parser("doctor", help="check Peloton and COROS credentials")
+    subparsers.add_parser(
+        "rename", help="rename state-tracked COROS activities to their Peloton titles"
+    )
 
     args = parser.parse_args(argv)
 
@@ -70,6 +73,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_status(settings)
     if args.command == "doctor":
         return _cmd_doctor(settings)
+    if args.command == "rename":
+        return _cmd_rename(settings)
     parser.error(f"unknown command {args.command!r}")  # pragma: no cover
     return 2
 
@@ -143,6 +148,13 @@ def _cmd_status(settings: Settings) -> int:
         print(f"  error: {label}: {error.error}", file=sys.stderr)
     print(f"state totals: {store.counts['synced']} synced, {store.counts['failed']} failed")
     return EXIT_OK
+
+
+def _cmd_rename(settings: Settings) -> int:
+    engine, _store = build_engine(settings)
+    renamed = engine.rename_uploaded()
+    print(f"renamed {renamed} activities")
+    return EXIT_OK if renamed >= 0 else EXIT_FAILED
 
 
 def _cmd_doctor(settings: Settings) -> int:

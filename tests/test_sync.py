@@ -173,3 +173,35 @@ def test_upload_phase_isolated_from_hydration_phase(
     assert calls.index(perf_calls[-1]) < calls.index(upload_calls[0]), (
         "all performance fetches must complete before the first upload"
     )
+
+
+def test_successful_upload_triggers_rename(
+    store: StateStore, settings: Settings
+) -> None:
+    peloton = FakePeloton(workouts=[make_workout("w1")], performances={"w1": cycling_performance()})
+    coros = FakeCoros()
+    engine = build_engine(peloton, coros, store, settings)
+    report = engine.run_cycle()
+    assert report.uploaded == 1
+    assert coros.renames == [(1_700_000_000, 201, "Power Zone Ride")]
+
+
+def test_rename_failure_does_not_fail_cycle(
+    store: StateStore, settings: Settings
+) -> None:
+    class RenamingCoros(FakeCoros):
+        def rename_after_import(
+            self,
+            start_time: int,
+            sport_hint: int | None,
+            name: str,
+            *,
+            timeout_s: float = 90.0,
+            interval_s: float = 10.0,
+        ) -> bool:
+            raise RuntimeError("rename endpoint down")
+
+    peloton = FakePeloton(workouts=[make_workout("w1")], performances={"w1": cycling_performance()})
+    engine = SyncEngine(peloton, RenamingCoros(), store, settings)
+    report = engine.run_cycle()
+    assert report.outcome == "ok" and report.uploaded == 1

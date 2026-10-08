@@ -80,6 +80,7 @@ class FakeCoros:
         self.deleted: list[str] = []
         self.uploads: list[tuple[bytes, str]] = []
         self.polls: list[tuple[str, float]] = []
+        self.renames: list[tuple[int, int | None, str]] = []
 
     def all_activities(self) -> list[ActivityItem]:
         return list(self.activities)
@@ -102,6 +103,18 @@ class FakeCoros:
     def wait_for_import(self, import_id: str, *, timeout_s: float) -> None:
         self.polls.append((import_id, timeout_s))
         return
+
+    def rename_after_import(
+        self,
+        start_time: int,
+        sport_hint: int | None,
+        name: str,
+        *,
+        timeout_s: float = 90.0,
+        interval_s: float = 10.0,
+    ) -> bool:
+        self.renames.append((start_time, sport_hint, name))
+        return True
 
 
 class StubEngine:

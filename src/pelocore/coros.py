@@ -20,6 +20,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -67,6 +68,8 @@ LOGIN_HEADERS: dict[str, str] = {
 
 SUCCESS_RESULT = "0000"
 IMPORT_STATUS_SUCCESS = 2
+
+logger = logging.getLogger(__name__)
 
 
 class CorosError(Exception):
@@ -576,6 +579,82 @@ class CorosClient:
             self.base_url + "/activity/delete",
             params={"labelId": label_id},
         )
+
+    def rename_activity(self, label_id: str, name: str) -> None:
+        """Rename an activity via ``activity/update``.
+
+        The web app sends the token in an all-lowercase ``accesstoken``
+        header plus a ``yfheader`` JSON blob (userId + language); mirror it.
+        """
+        self.ensure_auth()
+        account = self.account()
+        headers = {
+            "Content-Type": "application/json",
+            "accesstoken": self._token or "",
+            "yfheader": json.dumps({"userId": account.user_id, "language": "en-US"}),
+        }
+        try:
+            response = self._http.post(
+                self.base_url + "/activity/update",
+                data=json.dumps({"type": 1, "labelId": label_id, "name": name}),
+                headers=headers,
+                timeout=self._timeout,
+            )
+        except requests.RequestException as exc:
+            raise CorosHttpError(f"COROS rename failed: {exc}") from exc
+        _parse_envelope(response, self.base_url + "/activity/update")
+
+    def rename_after_import(
+        self,
+        start_time: int,
+        sport_hint: int | None,
+        name: str,
+        *,
+        timeout_s: float = 90.0,
+        interval_s: float = 10.0,
+    ) -> bool:
+        """Resolve the labelId for a just-imported activity and rename it.
+
+        COROS assigns the labelId while it processes the import, so poll
+        ``activity/query`` until a unique candidate appears within +/-60s of
+        ``start_time``. When ``sport_hint`` is given only activities with
+        that sportType count; otherwise a single unambiguous time match is
+        required (the importer may file files under an unexpected sport).
+        Returns True when renamed.
+        """
+        deadline = time.monotonic() + timeout_s
+        while True:
+            hinted: dict[str, ActivityItem] = {}
+            time_only: dict[str, ActivityItem] = {}
+            for page in (1, 2):
+                try:
+                    activities = self.list_activities(page=page, size=50)
+                except CorosError as exc:
+                    logger.debug("activity query failed during rename: %s", exc)
+                    continue
+                for item in activities:
+                    if abs(item.start_time - start_time) > 60:
+                        continue
+                    time_only[item.label_id] = item
+                    if sport_hint is not None and item.sport_type == sport_hint:
+                        hinted[item.label_id] = item
+            # Prefer a sport-hinted match; fall back to a unique time-only
+            # match (the importer may file files under an unexpected sport).
+            target_group = hinted or time_only
+            if len(target_group) == 1:
+                item = next(iter(target_group.values()))
+                self.rename_activity(item.label_id, name)
+                return True
+            if len(target_group) > 1:
+                logger.warning(
+                    "ambiguous rename target for start_time=%s (%d candidates); skipping",
+                    start_time,
+                    len(target_group),
+                )
+                return False
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(interval_s)
 
     def remove_from_import_list(self, import_id: str) -> None:
         """Remove an entry from the import list (post-delete cleanup)."""

@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from pelocore.config import Settings  # noqa: E402
 from pelocore.coros import ActivityItem, CorosClient  # noqa: E402
 from pelocore.peloton import PylotonClient  # noqa: E402
-from pelocore.sports import mapping_for  # noqa: E402
+from pelocore.sports import coros_sport_code  # noqa: E402
 from pelocore.state import StateStore, WorkoutRecord  # noqa: E402
 
 TIME_TOLERANCE_S = 60

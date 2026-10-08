@@ -10,7 +10,7 @@ from pelocore.config import Settings
 from pelocore.coros import ImportJob, UploadResult
 from pelocore.fitbuild import FitBuildResult, build_activity_fit
 from pelocore.peloton import ExerciseBlock, PelotonSource, PelotonWorkout
-from pelocore.sports import parse_remaps
+from pelocore.sports import coros_sport_code, parse_remaps
 from pelocore.state import CycleError, CycleReport, StateStore
 
 logger = logging.getLogger(__name__)
@@ -22,6 +22,15 @@ class CorosUploader(Protocol):
     def imported_filenames(self) -> set[str]: ...
     def upload_fit(self, fit_bytes: bytes, filename: str) -> UploadResult: ...
     def wait_for_import(self, import_id: str, *, timeout_s: float) -> ImportJob | None: ...
+    def rename_after_import(
+        self,
+        start_time: int,
+        sport_hint: int | None,
+        name: str,
+        *,
+        timeout_s: float = 90.0,
+        interval_s: float = 10.0,
+    ) -> bool: ...
 
 
 def fit_filename(workout_id: str) -> str:
@@ -202,6 +211,59 @@ class SyncEngine:
             logger.info("uploaded %s (%s)", workout.id, workout.title)
         except Exception as exc:
             self._record_error(workout, str(exc) or exc.__class__.__name__, report)
+            return
+        self._rename(workout, report)
+
+    def _rename(self, workout: PelotonWorkout, report: CycleReport) -> None:
+        """Rename the just-imported activity to the Peloton title.
+
+        The COROS importer ignores FIT-provided names; the labelId only
+        exists after import processing, so this resolves it by polling.
+        Failures are non-fatal: the upload itself succeeded.
+        """
+        try:
+            renamed = self._coros.rename_after_import(
+                workout.start_time,
+                coros_sport_code(workout.fitness_discipline, is_outdoor=workout.is_outdoor),
+                workout.title,
+                timeout_s=self._settings.import_poll_seconds,
+            )
+        except Exception as exc:
+            logger.warning("rename after upload failed for %s: %s", workout.id, exc)
+            return
+        if renamed:
+            logger.info("renamed %s to %r", workout.id, workout.title)
+        else:
+            logger.warning(
+                "could not resolve labelId for %s within the poll window; "
+                "run `pelocore rename` later",
+                workout.id,
+            )
+
+    def rename_uploaded(self) -> int:
+        """Retroactively rename every uploaded workout in state."""
+        renamed = 0
+        for workout_id, rec in self._store.uploaded().items():
+            if not rec.start_time:
+                logger.warning("no start_time recorded for %s; skipping", workout_id)
+                continue
+            try:
+                done = self._coros.rename_after_import(
+                    rec.start_time,
+                    coros_sport_code((rec.discipline or "").strip().lower()),
+                    rec.title or workout_id,
+                    timeout_s=15.0,
+                    interval_s=5.0,
+                )
+            except Exception as exc:
+                logger.warning("rename failed for %s: %s", workout_id, exc)
+                continue
+            if done:
+                renamed += 1
+                print(f"renamed {workout_id} -> {rec.title!r}")
+            else:
+                print(f"no matching COROS activity for {workout_id}")
+        return renamed
 
     def _record_error(
         self,

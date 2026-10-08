@@ -94,6 +94,11 @@ until the constants in `src/pelocore/coros.py` are updated.
 
 ## Data fidelity notes
 
+- **Activity names**: the COROS importer ignores FIT-provided names
+  (`session.sport_profile_name`), so imports start with sport-generic names
+  ("Indoor Bike", "Strength"). pelocore renames activities to their Peloton
+  titles after import via `POST /activity/update`; `pelocore rename` fixes
+  any state-tracked activities retroactively.
 - **Cycling distance/speed**: Peloton reports speed per second and distance
   only in the performance-graph summaries (there is no per-second distance
   series for rides). pelocore writes both - session `total_distance`,

@@ -23,7 +23,7 @@ from fit_tool.profile.messages.session_message import SessionMessage
 from fit_tool.profile.messages.set_message import SetMessage
 from fit_tool.profile.profile_type import Event, EventType, FileType, Manufacturer
 
-from pelocore.peloton import ExerciseBlock, PelotonWorkout, WorkoutPerformance
+from pelocore.peloton import ExerciseBlock, PelotonWorkout, WorkoutPerformance, display_name
 from pelocore.sports import SportMapping, mapping_for, remap_discipline
 
 #: Peloton performance data is imperial in the API; convert for FIT.
@@ -363,15 +363,12 @@ def _session_message(
     total_work_kj = agg.total_output_kj if agg.total_output_kj is not None else workout.total_work
     if total_work_kj is not None:
         session.total_work = total_work_kj
-    session.sport_profile_name = _profile_name(mapping.label, workout)
+    session.sport_profile_name = _profile_name(workout)
     return session
 
 
-def _profile_name(label: str, workout: PelotonWorkout) -> str:
-    name = f"Peloton {label}: {workout.title}"
-    if workout.instructor:
-        name += f" with {workout.instructor}"
-    return name[:MAX_PROFILE_NAME_CHARS]
+def _profile_name(workout: PelotonWorkout) -> str:
+    return display_name(workout.title, workout.instructor)[:MAX_PROFILE_NAME_CHARS]
 
 
 #: Seconds between the Unix epoch (1970-01-01) and the FIT epoch (1989-12-31).

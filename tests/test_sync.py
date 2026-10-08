@@ -183,7 +183,7 @@ def test_successful_upload_triggers_rename(
     engine = build_engine(peloton, coros, store, settings)
     report = engine.run_cycle()
     assert report.uploaded == 1
-    assert coros.renames == [(1_700_000_000, 201, "Power Zone Ride")]
+    assert coros.renames == [(1_700_000_000, 201, "Power Zone Ride with Denis Morton")]
 
 
 def test_rename_failure_does_not_fail_cycle(

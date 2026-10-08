@@ -9,7 +9,7 @@ from typing import Protocol
 from pelocore.config import Settings
 from pelocore.coros import ImportJob, UploadResult
 from pelocore.fitbuild import FitBuildResult, build_activity_fit
-from pelocore.peloton import ExerciseBlock, PelotonSource, PelotonWorkout
+from pelocore.peloton import ExerciseBlock, PelotonSource, PelotonWorkout, display_name
 from pelocore.sports import coros_sport_code, parse_remaps
 from pelocore.state import CycleError, CycleReport, StateStore
 
@@ -167,6 +167,9 @@ class SyncEngine:
         """Fetch performance data (and the class plan for strength) and build
         the FIT file; None on failure."""
         try:
+            detail = self._peloton.workout_by_id(workout.id)
+            if detail is not None:
+                workout = detail  # detail payload carries the class title
             perf = self._peloton.performance(workout.id)
             plan: list[ExerciseBlock] | None = None
             if not perf.samples and not perf.locations and workout.ride_id:
@@ -225,14 +228,18 @@ class SyncEngine:
             renamed = self._coros.rename_after_import(
                 workout.start_time,
                 coros_sport_code(workout.fitness_discipline, is_outdoor=workout.is_outdoor),
-                workout.title,
+                display_name(workout.title, workout.instructor),
                 timeout_s=self._settings.import_poll_seconds,
             )
         except Exception as exc:
             logger.warning("rename after upload failed for %s: %s", workout.id, exc)
             return
         if renamed:
-            logger.info("renamed %s to %r", workout.id, workout.title)
+            logger.info(
+                "renamed %s to %r",
+                workout.id,
+                display_name(workout.title, workout.instructor),
+            )
         else:
             logger.warning(
                 "could not resolve labelId for %s within the poll window; "
@@ -247,11 +254,19 @@ class SyncEngine:
             if not rec.start_time:
                 logger.warning("no start_time recorded for %s; skipping", workout_id)
                 continue
+            name = display_name(rec.title, rec.instructor)
+            try:
+                detail = self._peloton.workout_by_id(workout_id)
+            except Exception as exc:
+                logger.warning("could not refresh title for %s: %s", workout_id, exc)
+                detail = None
+            if detail is not None:
+                name = display_name(detail.title, detail.instructor)
             try:
                 done = self._coros.rename_after_import(
                     rec.start_time,
                     coros_sport_code((rec.discipline or "").strip().lower()),
-                    rec.title or workout_id,
+                    name,
                     timeout_s=15.0,
                     interval_s=5.0,
                 )
@@ -260,7 +275,7 @@ class SyncEngine:
                 continue
             if done:
                 renamed += 1
-                print(f"renamed {workout_id} -> {rec.title!r}")
+                print(f"renamed {workout_id} -> {name!r}")
             else:
                 print(f"no matching COROS activity for {workout_id}")
         return renamed

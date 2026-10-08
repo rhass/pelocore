@@ -6,6 +6,7 @@ with fakes: ``workouts_since(days)`` and ``performance(workout_id)``.
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -86,6 +87,17 @@ class ExerciseBlock:
     name: str
     duration_s: int
     muscle_groups: tuple[str, ...] = ()
+
+
+def display_name(title: str | None, instructor: str | None) -> str:
+    """The name a workout should carry in COROS: the Peloton title with the
+    instructor appended when it is not already part of it."""
+    clean_title = (title or "").strip()
+    instructor_name = (instructor or "").strip()
+    if instructor_name and instructor_name.lower() not in clean_title.lower():
+        joined = f"{clean_title} with {instructor_name}"
+        return joined if clean_title else f"Workout with {instructor_name}"
+    return clean_title or "Peloton Workout"
 
 
 class PelotonSource(Protocol):
@@ -340,8 +352,37 @@ class PylotonClient:
         return parse_performance(self._get_json(url))
 
     def workout_by_id(self, workout_id: str) -> PelotonWorkout | None:
+        """Fetch the workout DETAIL payload.
+
+        The workouts LIST response carries no ride title (auto-detected
+        names like "Cycling Workout" only); the detail payload has the full
+        ride object with the class title and instructor.
+        """
         raw = self._get_json(f"https://api.onepeloton.com/api/workout/{workout_id}")
-        return _normalize_workout(raw)
+        workout = _normalize_workout(raw)
+        if workout is None:
+            return None
+        instructor = self._instructor_name(raw)
+        if instructor and not workout.instructor:
+            workout = dataclasses.replace(workout, instructor=instructor)
+        return workout
+
+    def _instructor_name(self, raw: dict[str, Any]) -> str | None:
+        ride = raw.get("ride") or {}
+        if not isinstance(ride, dict):
+            return None
+        embedded = ride.get("instructor")
+        if isinstance(embedded, dict) and embedded.get("name"):
+            return str(embedded["name"])
+        instructor_id = ride.get("instructor_id")
+        if not instructor_id:
+            return None
+        try:
+            instructor = self._session().GetInstructorById(str(instructor_id))
+        except Exception:
+            return None
+        name = instructor.get("name") if isinstance(instructor, dict) else None
+        return str(name) if name else None
 
     def class_plan(self, ride_id: str) -> list[ExerciseBlock]:
         """Per-exercise blocks from the strength class plan.

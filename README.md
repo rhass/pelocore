@@ -115,6 +115,24 @@ until the constants in `src/pelocore/coros.py` are updated.
   avg/max HR and per-second records), and COROS then computes a nonzero
   load. Wear the strap for strength and pilates classes if Training Load
   matters to you.
+
+### Heart rate setup: broadcast from your COROS wearable
+
+Peloton hardware and the Peloton app cannot read a wrist-based wearable
+directly. The way to get your HR into Peloton workouts is to **broadcast
+heart rate from the COROS watch** (Settings → Broadcast Heart Rate on
+supported models) and pair that broadcast as a standard Bluetooth heart-rate
+sensor with whatever is running the class:
+
+- **Peloton Bike / Tread / Row hardware**: add the broadcast as a Bluetooth
+  HR sensor in the device's sensor-pairing screen.
+- **Peloton app (tablet or phone)**: pair the broadcast as a Bluetooth HR
+  sensor from the app's heart-rate settings before starting the class.
+
+Once paired, HR is captured by Peloton per workout and flows through
+pelocore into the generated FIT files — which is what COROS needs to
+compute Training Load for strength, yoga and stretching imports (and gives
+cycling/running their full HR metrics).
 - Peloton `muscle_group_score` (per-muscle percentages) is available in the
   API but has no standard FIT representation; it is not written today.
 

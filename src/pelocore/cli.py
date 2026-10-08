@@ -84,9 +84,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     settings = Settings()
+    # force=True: importing pelocore.cli transitively installs a root
+    # handler, which would otherwise make this basicConfig a no-op and
+    # leave the root level at WARNING, hiding INFO lines.
     logging.basicConfig(
         level=os.environ.get("PELOCORE_LOG_LEVEL", settings.log_level).upper(),
         format="%(asctime)s %(levelname)-7s %(name)s %(message)s",
+        force=True,
     )
 
     if args.command == "sync":

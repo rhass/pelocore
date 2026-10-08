@@ -158,8 +158,7 @@ class SyncEngine:
                     display_name(workout.title, workout.instructor),
                 )
             report.outcome = "ok"
-            self._finish(report)
-            return report
+            return report  # a plan is not a cycle: no history entry
 
         # Phase 1: hydrate everything from Peloton first - fetch performance
         # data and build the FIT files before touching COROS, so Peloton-side

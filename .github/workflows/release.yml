@@ -128,7 +128,9 @@ jobs:
             org.opencontainers.image.description=Bridge that syncs Peloton workouts to COROS as FIT files
             org.opencontainers.image.licenses=Apache-2.0
 
-      # amd64: build and push by digest.
+      # amd64: build and push by digest. Only the bare image name may be
+      # passed: buildx refuses tagged refs with push-by-digest. The versioned
+      # tags are attached later by the imagetools manifest list.
       - name: Push amd64 by digest
         id: push_amd64
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -136,9 +138,9 @@ jobs:
           context: .
           platforms: linux/amd64
           push: ${{ !inputs.dry_run }}
-          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true
+          tags: ${{ env.REGISTRY_IMAGE }}
+          outputs: type=image,push-by-digest=true,name-canonical=true
 
       # arm64: build and push by digest.
       - name: Push arm64 by digest
@@ -148,9 +150,9 @@ jobs:
           context: .
           platforms: linux/arm64
           push: ${{ !inputs.dry_run }}
-          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true
+          tags: ${{ env.REGISTRY_IMAGE }}
+          outputs: type=image,push-by-digest=true,name-canonical=true
 
       - name: Record digests
         id: push

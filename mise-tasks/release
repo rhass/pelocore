@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE description="Cut a release: signed annotated tag, pushed to origin (release CI takes over)"
+set -euo pipefail
+tag="${1:?usage: mise run release vX.Y.Z}"
+case "$tag" in
+  v*) ;;
+  *) echo "tag must start with v (got: $tag); usage: mise run release vX.Y.Z" >&2; exit 1 ;;
+esac
+git tag -s "$tag" -m "pelocore $tag"
+git push origin "$tag"

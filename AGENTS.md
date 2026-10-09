@@ -63,6 +63,7 @@ Commit and push only when the user asks.
 | `src/pelocore/status.py` | HTML/JSON/Prometheus renderers (pure functions) |
 | `tests/` | pytest; HTTP mocked with `responses`; fakes in `conftest.py` |
 | `scripts/backfill_reupload.py` | one-off: delete COROS activities + clear state for re-upload |
+| `mise-tasks/` | mise file tasks (release tag cutter) |
 | `deploy/k8s/` | CronJob (one-shot) and Deployment (service) manifests |
 
 ### Testing conventions

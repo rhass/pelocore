@@ -52,11 +52,3 @@ op run -- act push --workflows .github/workflows/ci.yml -s CGDEV_USERNAME -s CGD
 [tasks.act-release-verify]
 description = "Run release verify job locally with act (requires Docker)"
 run = "act workflow_dispatch --workflows .github/workflows/release.yml --job verify --input dry_run=true"
-
-[tasks.release]
-description = "Cut a release: signed annotated tag, pushed to origin (release CI takes over)"
-run = """
-tag="${1:?usage: mise run release vX.Y.Z}"
-git tag -s "$tag" -m "pelocore $tag"
-git push origin "$tag"
-"""

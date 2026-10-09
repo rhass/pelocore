@@ -98,6 +98,7 @@ jobs:
       - name: Trivy image scan (gate)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.75.0
           scan-type: image
           image-ref: pelocore:scan
           scanners: vuln
@@ -196,6 +197,7 @@ jobs:
       contents: read
       packages: write
       id-token: write # required for keyless OIDC signing
+      attestations: write # provenance attest also persists a storage record
     steps:
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
@@ -221,6 +223,7 @@ jobs:
       - name: Generate CycloneDX SBOM
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.75.0
           scan-type: image
           image-ref: ${{ env.REGISTRY_IMAGE }}@${{ needs.build.outputs.digest_amd64 }}
           format: cyclonedx

@@ -44,6 +44,7 @@ jobs:
       - name: Trivy filesystem scan (report all severities)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.75.0
           scan-type: fs
           scan-ref: .
           scanners: vuln,secret
@@ -64,6 +65,7 @@ jobs:
       - name: Trivy filesystem scan (gate HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.75.0
           scan-type: fs
           scan-ref: .
           scanners: vuln,secret
@@ -87,6 +89,7 @@ jobs:
       - name: Trivy misconfiguration scan (report all severities)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.75.0
           scan-type: config
           scan-ref: .
           cache: "false"
@@ -104,6 +107,7 @@ jobs:
       - name: Trivy misconfiguration scan (gate HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.75.0
           scan-type: config
           scan-ref: .
           cache: "false"
@@ -143,6 +147,7 @@ jobs:
       - name: Trivy image scan (gate HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.75.0
           scan-type: image
           image-ref: pelocore:ci
           scanners: vuln

@@ -41,12 +41,22 @@ run = "docker build -t pelocore:dev ."
 description = "Run CI workflow locally with act (requires Docker)"
 # The runner image (~1.2 GB) is pulled once; pre-pulling makes progress
 # visible instead of act appearing stuck on its first run. Scoped with -W:
-# bare `act push` would also run release.yml (act ignores tag filters).
+# bare `act push` would also run release.yml. -W takes a path, not a name.
+# op run resolves the CGDEV_* op:// references before act forwards them (-s
+# NAME reads act's own env); requires the 1Password CLI from .mise.local.toml.
 run = """
 docker pull -q catthehacker/ubuntu:act-24.04
-act push --workflows ci.yml
+op run -- act push --workflows .github/workflows/ci.yml -s CGDEV_USERNAME -s CGDEV_PASSWORD
 """
 
 [tasks.act-release-verify]
 description = "Run release verify job locally with act (requires Docker)"
-run = "act workflow_dispatch --workflows release.yml --job verify --input dry_run=true"
+run = "act workflow_dispatch --workflows .github/workflows/release.yml --job verify --input dry_run=true"
+
+[tasks.release]
+description = "Cut a release: signed annotated tag, pushed to origin (release CI takes over)"
+run = """
+tag="${1:?usage: mise run release vX.Y.Z}"
+git tag -s "$tag" -m "pelocore $tag"
+git push origin "$tag"
+"""

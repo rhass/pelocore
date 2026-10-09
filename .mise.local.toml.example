@@ -35,14 +35,6 @@
 # `mise use 1password` adds this line for you.
 1password = "latest"
 
-[env]
-# --- Docker Hardened Images base (optional) -------------------------------
-# Release CI reads these from repo secrets (DOCKERHUB_USERNAME/DOCKERHUB_TOKEN).
-# Locally they are only needed to build with the dhi.io base:
-#   mise run docker-build-with-dhi   (or: docker build --build-arg BASE_IMAGE=dhi.io/python:3.13 .)
-DOCKERHUB_USERNAME = ""            # or "op://Private/dockerhub/username"
-DOCKERHUB_TOKEN = ""               # or "op://Private/dockerhub/token"
-
 # --- Peloton credentials ----------------------------------------------------
 # Reference format: op://<vault>/<item>/<field>
 PELOTON_USERNAME = ""              # or "op://Private/pelocore/peloton-username"
@@ -54,6 +46,15 @@ COROS_EMAIL = ""                   # or "op://Private/pelocore/coros-email"
 COROS_PASSWORD = ""                # or "op://Private/pelocore/coros-password"
 COROS_ACCESS_TOKEN = ""            # browser session token; skips password login
 COROS_REGION = "en"
+
+# --- Container registry: Chainguard (cgr.dev) -------------------------------
+# Only needed for local act runs of the image build jobs (ci.yml image, release
+# build). Plain local docker pulls of the public images need no auth; logging
+# in raises pull rate limits. The act-ci task forwards these with `-s NAME`
+# (act reads them from its own env) inside `op run --`, so the references
+# resolve before act starts. Plain values also work here.
+CGDEV_USERNAME = ""                # or "op://Private/Chaingaurd cgr.dev login/username"
+CGDEV_PASSWORD = ""                # or "op://Private/Chaingaurd cgr.dev login/password"
 
 # --- Misc -------------------------------------------------------------------
 # Set to "1" to enable live tests: PELOCORE_LIVE=1 mise exec -- uv run pytest -m live
@@ -84,7 +85,3 @@ run = "op run -- uv run pelocore doctor"
 [tasks.run-status]
 description = "Print sync history from the state file"
 run = "uv run pelocore status"
-
-[tasks.docker-build-with-dhi]
-description = "Build the container image on the hardened DHI base"
-run = "docker build --build-arg BASE_IMAGE=dhi.io/python:3.13 -t pelocore:dhi ."

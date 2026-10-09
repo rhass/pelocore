@@ -221,7 +221,7 @@ $ kubectl -n pelocore apply -f deploy/k8s/cronjob.yaml     # or deployment.yaml
 
 ## Container image
 
-Multi-arch (`linux/amd64`, `linux/arm64`), non-root (uid 10001), released to
+Multi-arch (`linux/amd64`, `linux/arm64`), non-root (uid 65532), released to
 GHCR on tags:
 
 ```console
@@ -256,22 +256,43 @@ $ cosign verify-attestation --type slsaprovenance \
     ghcr.io/rhass/pelocore:vX.Y.Z
 ```
 
+### Cutting a release
+
+Release CI runs on `v*` tags and refuses to ship an unsigned tag: it imports
+the GPG keys registered to the repo owner's GitHub account and verifies the
+tag signature cryptographically. Prerequisites:
+
+1. Register your GPG public key under Settings > SSH and GPG keys on GitHub.
+2. Sign tags by default (`git config tag.gpgsign true`) or pass `-s` per tag.
+3. Local signing needs a gpg binary (CI runners ship one; macOS installs it
+   via MacPorts `gnupg2`, Homebrew `gnupg`, or GPG Suite).
+4. Cut and push the tag (or use the mise task, which does both):
+
+   ```console
+   $ mise run release v0.1.0
+   ```
+
+CI then verifies the tag, runs lint/typecheck/tests, builds both
+architectures on the Chainguard base, gates on a HIGH/CRITICAL image scan,
+pushes by digest to GHCR, assembles the multi-arch manifest list, signs with
+cosign (keyless), attests SBOM + provenance, and publishes the GitHub release.
+
 ### Base image
 
-The Dockerfile accepts a swappable base:
+The image builds on Chainguard's minimal Python:
 
-| Base | Image | Access |
-|---|---|---|
-| Default | `python:3.13-slim` | none |
-| **Docker Hardened Images** (default in release CI) | `dhi.io/python:3.13` | free Docker account; set `DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN` repo secrets |
-| Iron Bank | `registry1.dso.mil/ironbank/opensource/python/python3.13` | DoD Platform One access request |
-| Minimus | `registry.minimus.io/minimus/python` | commercial subscription |
+| Stage | Image |
+|---|---|
+| Builder | `cgr.dev/chainguard/python:latest-dev` (bash, apk, discarded at build end) |
+| Runtime | `cgr.dev/chainguard/python:latest` (nonroot uid 65532, no shell, no pip) |
 
-Build with an alternative:
-
-```console
-$ docker build --build-arg BASE_IMAGE=registry1.dso.mil/ironbank/opensource/python/python3.13 -t pelocore .
-```
+The runtime ships no shell, so it contains no RUN instructions: all setup
+happens in the builder and is copied in. The public images can be pulled
+anonymously, but CI logs in with the `CGDEV_USERNAME`/`CGDEV_PASSWORD` repo
+secrets: authenticated pulls raise the rate limit that shared GitHub runner
+IPs otherwise hit. `latest` floats with Chainguard's packaging (currently
+Python 3.14, ahead of the 3.13 local dev toolchain); the Dockerfile asserts
+the expected minor version and fails the build on drift.
 
 ## Development
 
@@ -296,9 +317,14 @@ This catches CI-only behavior differences - action wrappers, job wiring -
 before pushing:
 
 ```console
-$ mise run act-ci                 # verify + both Trivy scans
-$ mise run act-release-verify     # release verify/build path (dry-run)
+$ mise run act-ci                 # verify + both Trivy scans + image build
+$ mise run act-release-verify     # release verify path (dry-run)
 ```
+
+The image build job logs in to cgr.dev: the act-ci task forwards the CGDEV
+secrets with `-s NAME` inside `op run --`, resolving the references from
+`.mise.local.toml` before act starts (add the CGDEV entries from
+[.mise.local.toml.example](.mise.local.toml.example)).
 
 Runner images and architecture come from `.actrc`. What act cannot exercise
 locally: keyless cosign signing (needs GitHub's OIDC provider), GHCR push,

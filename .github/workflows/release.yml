@@ -122,7 +122,6 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=sha-,format=long
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
           labels: |
             org.opencontainers.image.title=pelocore
             org.opencontainers.image.description=Bridge that syncs Peloton workouts to COROS as FIT files
@@ -166,17 +165,28 @@ jobs:
           fi
 
       # A manifest list is required so a tag points at both architectures.
+      # Tags arrive newline-separated: pass them through env (inline
+      # interpolation would splice the newlines into the script) and dedupe.
       - name: Create manifest list and push
         if: ${{ inputs.dry_run != true }}
         working-directory: /tmp
+        env:
+          IMAGE: ${{ env.REGISTRY_IMAGE }}
+          DIGEST_AMD64: ${{ steps.push_amd64.outputs.digest }}
+          DIGEST_ARM64: ${{ steps.push_arm64.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
         run: |
-          IMAGE="${{ env.REGISTRY_IMAGE }}"
-          for tag in ${{ steps.meta.outputs.tags }}; do
+          set -euo pipefail
+          seen=""
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            case "$seen" in *"|$tag|"*) continue ;; esac
+            seen="$seen|$tag|"
             docker buildx imagetools create \
               -t "$tag" \
-              "${IMAGE}@${{ steps.push_amd64.outputs.digest }}" \
-              "${IMAGE}@${{ steps.push_arm64.outputs.digest }}"
-          done
+              "${IMAGE}@${DIGEST_AMD64}" \
+              "${IMAGE}@${DIGEST_ARM64}"
+          done <<< "$TAGS"
 
   sign:
     needs: build
@@ -229,7 +239,8 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ env.REGISTRY_IMAGE }}
-          subject-digest: sha256:${{ needs.build.outputs.digest_amd64 }}
+          # build-push digest outputs already carry the sha256: prefix.
+          subject-digest: ${{ needs.build.outputs.digest_amd64 }}
           push-to-registry: true
 
   release:

@@ -299,8 +299,10 @@ happens in the builder and is copied in. The public images can be pulled
 anonymously, but CI logs in with the `CGDEV_USERNAME`/`CGDEV_PASSWORD` repo
 secrets: authenticated pulls raise the rate limit that shared GitHub runner
 IPs otherwise hit. `latest` floats with Chainguard's packaging (currently
-Python 3.14, ahead of the 3.13 local dev toolchain); the Dockerfile asserts
-the expected minor version and fails the build on drift.
+Python 3.15, ahead of the 3.13 local dev toolchain; note that Chainguard's
+versioned tags like `3.14` are a paid feature, so the free tier always rides
+`latest`); the Dockerfile asserts the expected minor version and fails the
+build on drift.
 
 ## Development
 

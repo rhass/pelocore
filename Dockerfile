@@ -5,7 +5,8 @@
 # pip). The uv venv symlinks to the builder's interpreter, so the runtime must
 # ship Python at the same path; the dev and runtime variants are built from the
 # same package set and do, and the version assert below fails fast if latest
-# ever floats to a new minor. The runtime has no shell, so it contains no RUN
+# ever floats to a new minor (bumping PYTHON_VERSION is the deliberate
+# response). The runtime has no shell, so it contains no RUN
 # instructions: all setup happens in the builder and is copied in.
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12.23
 
@@ -15,7 +16,7 @@ FROM ${UV_IMAGE} AS uv
 # ---- builder ---------------------------------------------------------------
 FROM cgr.dev/chainguard/python:latest-dev AS builder
 
-ARG PYTHON_VERSION=3.14
+ARG PYTHON_VERSION=3.15
 
 # The dev variant defaults to uid 65532; flip to root for system-level setup.
 USER root

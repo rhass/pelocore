@@ -65,6 +65,7 @@ Commit and push only when the user asks.
 | `scripts/backfill_reupload.py` | one-off: delete COROS activities + clear state for re-upload |
 | `scripts/experiment_stretch_sport.py` | one-off experiment harness: importer categorization trials (T1-T22) |
 | `scripts/recategorize_bootcamps.py` | one-off: fold-recategorize historical bootcamps to converter v2 |
+| `docs/coros-importer.md` | canonical reference: COROS FIT importer model, failure modes, watch-path encodings |
 | `mise-tasks/` | mise file tasks (release tag cutter) |
 | `deploy/k8s/` | CronJob (one-shot) and Deployment (service) manifests |
 
@@ -94,53 +95,33 @@ docstrings of `coros.py` and `peloton.py`. Non-obvious traps:
   field and uses the header `AccessToken` (capital A); all other API calls
   use `accessToken`. Renames (`activity/update`) use `accesstoken` (all
   lowercase) plus a `yfheader` JSON blob. Three different header casings.
-- The importer consults (primary sport, sub_sport) pair overrides first,
-  then a primary-sport table that defaults each family to its indoor
-  variant. Exhaustively mapped by re-uploading one real session with every
-  candidate encoding (`scripts/experiment_stretch_sport.py`, 2026-10-11):
-  `RUNNING`->101 Indoor Run, `CYCLING`->201 Indoor Cycling,
-  `ROWING`->701 Indoor Rower, `FITNESS_EQUIPMENT`->903 Elliptical,
-  `TRAINING`->402 Strength, `GENERIC`->400 Gym Cardio, `JUMP_ROPE`->901,
-  `FLOOR_CLIMBING`->902 Stair Climb, `BOXING`->906; `WALKING`,
-  `MEDITATION`, `DANCE`, `MOBILITY` and `HIIT` are unmapped (walking once
-  landed uncategorized as 65535; HIIT/DANCE/MOBILITY/MEDITATION imports
-  were dropped with no activity at all - state still records "uploaded",
-  so state can lie about activity creation). Pair overrides exist only in
-  the FITNESS_EQUIPMENT family: `+PILATES`->905 and `+ELLIPTICAL`->903;
-  unknown subsports there (`YOGA`, `FLEXIBILITY_TRAINING`) ERROR the
-  import (errorSize=1, no activity) instead of falling back.
-  `MULTISPORT` primary sport also errors outright.
+- The importer categorizes by (primary sport, sub_sport) pair overrides
+  first, then a primary-sport table that defaults each family to its
+  indoor variant. Pair overrides exist only in the FITNESS_EQUIPMENT
+  family (`+PILATES`->905, `+ELLIPTICAL`->903); unknown subsports there
+  (`YOGA`, `FLEXIBILITY_TRAINING`) ERROR the import (errorSize=1, no
+  activity) instead of falling back. `WALKING`, `MEDITATION`, `DANCE`,
+  `MOBILITY`, `HIIT` and `MULTISPORT` are unmapped: HIIT/MULTISPORT
+  imports fail outright, walking once landed uncategorized (65535), the
+  rest were dropped with no activity - and state records "uploaded"
+  regardless, so state can lie about activity creation. The canonical
+  model (full table, failure modes, watch-path encodings, unreachable
+  categories) lives in [docs/coros-importer.md](docs/coros-importer.md),
+  mapped exhaustively by `scripts/experiment_stretch_sport.py` (2026-10-11).
 - pelocore's mapping decisions (converter v2): yoga/stretching/meditation
-  -> GENERIC (Gym Cardio 400 - user preference over Strength; Yoga 904 is
-  unreachable), pilates -> FITNESS_EQUIPMENT+PILATES (real 905 Pilates),
-  all bootcamp variants -> TRAINING/STRENGTH_TRAINING (Strength 402 -
-  Hybrid Fitness 1200 has no watch mode to learn an encoding from, and
-  MULTISPORT/HIIT imports fail).
-- COROS multisport exports are ZIPs of per-leg single-sport FITs (cycling
-  leg + strength leg, each standard-encoded with its own session); no
-  "multisport" sport value appears in any file - the grouped 10001
-  Multisport activity is produced only by the watch sync path. Re-importing
-  the byte-exact ZIP through the import pipeline creates separate per-leg
-  activities (201 + 402), never a grouped one. A direct S3 PUT of a zip
-  (no inner `{md5}/{file}` wrapper) imports cleanly, mirroring the web
-  portal's bulk upload.
-- Yoga (904) is watch-path only and unreachable via import - proven by
-  re-importing the byte-exact native watch export of a yoga session: it
-  lands as 402 Strength. The watch writes yoga as `TRAINING`+`YOGA` and
-  syncs it as 904; the same encoding through the importer lands as 402.
-  The COROS app cannot change an activity's type either (title only), and
-  `activity/update` rejects sportType changes, so imported activities are
-  stuck in their importer-assigned category. TCX imports do not help: a
-  TCX labeled `Sport="Yoga"` lands as 400 Gym Cardio (unknown sport strings
-  convert to GENERIC).
-- COROS's own docs list the officially supported import modes (Run, Indoor
-  Run, Trail Run, Track Run, Bike, Indoor Bike, Pool Swim, Open Water,
-  Mountain Climb, Hike, Multisport, Bouldering, GPS Cardio, Strength,
-  Indoor Climb, Gym Cardio, ball sports) - the list is stale (rowing
-  imports fine despite being unlisted) but yoga/stretching really are
-  unsupported. Muscle heatmaps are not available for imported activities
-  (they are derived server-side from COROS plan sessions; native FIT
-  exports contain no muscle data).
+  -> GENERIC (Gym Cardio 400; Yoga 904 is unreachable), pilates ->
+  FITNESS_EQUIPMENT+PILATES (real 905 Pilates), all bootcamp variants ->
+  TRAINING/STRENGTH_TRAINING (Strength 402 - Hybrid Fitness 1200 has no
+  watch mode and MULTISPORT/HIIT imports fail). Do not change these
+  without re-running the experiment harness first.
+- COROS multisport exports are ZIPs of per-leg single-sport FITs, and the
+  importer never groups them (byte-exact re-import -> separate 201 + 402
+  activities). A direct S3 PUT of a zip (no inner `{md5}/{file}` wrapper)
+  imports cleanly, mirroring the web portal's bulk upload.
+- The officially "supported import modes" docs are stale: rowing imports
+  fine unlisted; yoga/stretching really are unsupported. Muscle heatmaps
+  are not available for imported activities (server-side derivation; FIT
+  carries no muscle data).
 - Re-uploading a FIT whose start time matches an existing activity folds
   into it in place (same labelId): the category is re-derived from the
   file's sport encoding and the display name resets to the sport default

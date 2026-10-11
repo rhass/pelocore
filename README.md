@@ -39,7 +39,8 @@ What COROS does with an imported activity is decided by its importer, based
 on the FIT encoding alone. I mapped that behavior exhaustively by
 re-uploading one real session with every candidate encoding
 ([scripts/experiment_stretch_sport.py](scripts/experiment_stretch_sport.py));
-the full importer model lives in [AGENTS.md](AGENTS.md). Pilates is the
+the full importer model lives in
+[docs/coros-importer.md](docs/coros-importer.md). Pilates is the
 lone bright spot: it imports as Pilates (905), the only non-GPS discipline
 that maps faithfully. Everything else has a catch:
 

@@ -2,6 +2,9 @@
 """One-off experiment: can the COROS importer categorize a stretch session as
 Yoga (sportType 904) instead of Strength (402)?
 
+Findings are recorded in docs/coros-importer.md; the trial list below is the
+historical record of how they were established.
+
 Re-uploads ONE real session - "5 min Post-Ride Stretch with Denis Morton"
 (2026-10-10, Peloton afedf3e9eaaf4d308a349f1e9e711776) - with different FIT
 encodings. Known importer behavior (verified 2026-10-11): a re-upload folds

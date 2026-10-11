@@ -39,15 +39,14 @@ What COROS does with an imported activity is decided by its importer, based
 on the FIT encoding alone. I mapped that behavior exhaustively by
 re-uploading one real session with every candidate encoding
 ([scripts/experiment_stretch_sport.py](scripts/experiment_stretch_sport.py));
-the full importer model lives in [AGENTS.md](AGENTS.md). What that means in
-practice:
+the full importer model lives in [AGENTS.md](AGENTS.md). Pilates is the
+lone bright spot: it imports as Pilates (905), the only non-GPS discipline
+that maps faithfully. Everything else has a catch:
 
 - **yoga, stretching and meditation import as Gym Cardio (400)**. COROS's
   import pipeline cannot produce its Yoga category (904) - that exists only
   on the watch path, and neither the COROS app nor the API can change an
   activity's type after import. `GENERIC` is the closest reachable category.
-- **pilates imports as Pilates (905)** - the one non-GPS discipline with a
-  faithful mapping.
 - **bootcamps import as Strength (402)**. Hybrid Fitness (1200) and grouped
   Multisport (10001) are watch-path only; FITs encoding them are rejected.
 - **walking imports land uncategorized** in COROS.
@@ -86,7 +85,7 @@ $ kubectl -n pelocore apply -f secret.yaml
 $ kubectl -n pelocore apply -f deploy/k8s/cronjob.yaml    # every 15 min
 ```
 
-The published image works anywhere cron-like
+The published image runs anywhere you can schedule a container
 ([Container image](#container-image)). `pelocore run` (long-running, with
 the status page) is the alternative: `mise run start` locally, or
 `deployment.yaml` in k8s.
@@ -102,8 +101,8 @@ the status page) is the alternative: `mise run start` locally, or
 | `COROS_REGION` | `en` | `en`, `eu`, or `cn` (uploads unsupported on `cn`) |
 | `PELOCORE_TIMEZONE_QUARTERS` | host offset | COROS timezone in quarter-hours east of UTC (32 = UTC+8) |
 | `PELOCORE_BACKFILL_DAYS` | `7` | How far back to look for unsynced workouts |
-| `PELOCORE_SPORT_REMAPS` | none built-in | Optional discipline remaps, e.g. `meditation=yoga`; see Limitations for the default categories |
-| `PELOCORE_AUTO_UPGRADE` | `on` | When a conversion change would produce different FIT bytes, delete the stale COROS activity and re-upload automatically (conservative: ambiguous matches are skipped, never deleted blind). Set `off` to keep converter upgrades from re-importing history |
+| `PELOCORE_SPORT_REMAPS` | none built-in | Optional discipline remaps, e.g. `meditation=yoga`; the default categories are listed under Limitations |
+| `PELOCORE_AUTO_UPGRADE` | `on` | When a conversion change would produce different FIT bytes, delete the stale COROS activity and re-upload automatically. Conservative: ambiguous matches are skipped, never deleted blind. Set `off` to keep converter upgrades from re-importing history |
 | `PELOCORE_IMPORT_POLL_SECONDS` | `60` | How long to poll COROS import status per upload |
 | `PELOCORE_STATE_PATH` | `data/state.json` | State file location |
 | `PELOCORE_SERVER_HOST` / `PELOCORE_SERVER_PORT` | `0.0.0.0` / `8080` | Status server bind |
@@ -190,6 +189,12 @@ $ pelocore sync --since 2026-02-01 --chunk-size 10 --chunk-delay 30
 
 ## Heart rate setup: broadcast from your COROS wearable
 
+COROS computes Training Load in the context of your other activities, but
+Peloton workouts without heart rate data give it nothing to work with: for
+imported strength, yoga and stretching sessions it reports load 0. pelocore
+bridges that gap, but only if your Peloton workouts capture heart rate in
+the first place.
+
 Peloton hardware and the Peloton app cannot read a wrist-based wearable
 directly. The way to get your HR into Peloton workouts is to **broadcast
 heart rate from the COROS watch** (Settings → Broadcast Heart Rate on
@@ -198,12 +203,14 @@ sensor with whatever is running the class:
 
 - **Peloton Bike / Tread / Row hardware**: add the broadcast as a Bluetooth
   HR sensor in the device's sensor-pairing screen.
+- **Peloton Guide**: pair the broadcast as a Bluetooth HR sensor in its
+  settings.
 - **Peloton app (tablet or phone)**: pair the broadcast as a Bluetooth HR
   sensor from the app's heart-rate settings before starting the class.
 
 Once paired, HR is captured by Peloton per workout and flows through
-pelocore into the generated FIT files - which is what COROS needs to
-compute Training Load for strength, yoga and stretching imports (and gives
+pelocore into the generated FIT files. That is what COROS needs to compute
+Training Load for strength, yoga and stretching imports (and gives
 cycling/running their full HR metrics).
 
 ## Kubernetes

@@ -1,5 +1,13 @@
 # pelocore
 
+<p align="center">
+  <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="assets/logo/logo-horizontal-reverse.svg">
+        <source media="(prefers-color-scheme: light)" srcset="assets/logo/logo-horizontal.svg">
+        <img src="assets/logo/logo-horizontal.svg" alt="pelocore" width="480">
+  </picture>
+</p>
+
 Peloton → COROS activity bridge. Fetches your Peloton workouts, converts them
 to Garmin FIT files, and uploads them to your COROS Training Hub - on a
 schedule, with a built-in status page.

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640">
+  <rect width="1280" height="640" fill="#0B132B"/>
+  <circle cx="1170" cy="90" r="180" fill="#132044" opacity="0.65"/>
+  <circle cx="1050" cy="610" r="260" fill="#101A36" opacity="0.85"/>
+  <g transform="translate(90 120) scale(.58)">
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M92 202 C118 150 162 122 223 122 H350" stroke="#FF6B3D" stroke-width="62"/>
+      <path d="M350 122 L404 122 L364 82" stroke="#FF6B3D" stroke-width="62"/>
+      <path d="M420 310 C394 362 350 390 289 390 H162" stroke="#2DD4BF" stroke-width="62"/>
+      <path d="M162 390 L108 390 L148 430" stroke="#2DD4BF" stroke-width="62"/>
+    </g>
+    <circle cx="256" cy="256" r="45" fill="#FFFFFF"/>
+  </g>
+  <text x="365" y="295" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="128" font-weight="750" letter-spacing="-5" fill="#FFFFFF">pelocore</text>
+  <text x="365" y="370" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="38" font-weight="550" letter-spacing="1" fill="#D7DEE9">Bridge your workouts. Own your data.</text>
+  <text x="365" y="438" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="23" font-weight="600" fill="#2DD4BF">PELOTON  >  FIT  >  COROS</text>
+  <rect x="92" y="540" width="1096" height="2" fill="#2DD4BF" opacity="0.5"/>
+  <text x="92" y="585" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="600" letter-spacing="3" fill="#AAB4C4">OPEN SOURCE • PERSONAL DATA PIPELINE</text>
+</svg>

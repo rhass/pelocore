@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Pelocore monochrome mark</title>
+  <g fill="none" stroke="#0B132B" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M92 202 C118 150 162 122 223 122 H350" stroke-width="62"/>
+    <path d="M350 122 L404 122 L364 82" stroke-width="62"/>
+    <path d="M420 310 C394 362 350 390 289 390 H162" stroke-width="62"/>
+    <path d="M162 390 L108 390 L148 430" stroke-width="62"/>
+  </g>
+  <circle cx="256" cy="256" r="45" fill="#0B132B"/>
+</svg>

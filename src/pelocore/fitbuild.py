@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 
 from fit_tool import FitFile, FitFileBuilder
 from fit_tool.profile.messages.activity_message import ActivityMessage
+from fit_tool.profile.messages.device_info_message import DeviceInfoMessage
 from fit_tool.profile.messages.event_message import EventMessage
 from fit_tool.profile.messages.exercise_title_message import ExerciseTitleMessage
 from fit_tool.profile.messages.file_id_message import FileIdMessage
@@ -35,7 +36,12 @@ MAX_PROFILE_NAME_CHARS = 120
 #: Bump only when conversion behavior changes. Changing it changes the FIT
 #: bytes, which is what makes COROS's md5-keyed dedupe treat versions as
 #: distinct activities - the basis of automatic upgrade-on-drift.
-CONVERTER_VERSION = 1
+#: v2 (0.2.0): pilates -> FITNESS_EQUIPMENT+PILATES (imports as 905 Pilates),
+#: yoga/stretching/meditation -> GENERIC (Gym Cardio 400), all bootcamp
+#: variants -> TRAINING/STRENGTH_TRAINING (Strength 402). Set
+#: PELOCORE_AUTO_UPGRADE=off to keep the version bump from re-importing
+#: history (scripts/recategorize_bootcamps.py already handled bootcamps).
+CONVERTER_VERSION = 2
 
 
 class FitBuildError(Exception):
@@ -59,6 +65,7 @@ def build_activity_fit(
     remaps: dict[str, str] | None = None,
     manufacturer: int | None = None,
     product: int | None = None,
+    device_model: str | None = None,
 ) -> FitBuildResult:
     effective = remap_discipline(workout.fitness_discipline, remaps)
     mapping = mapping_for(effective, is_outdoor=workout.is_outdoor)
@@ -75,6 +82,17 @@ def build_activity_fit(
     file_id.serial_number = _serial_number(workout.id)
     file_id.time_created = end_ms
     builder.add(file_id)
+
+    if device_model is not None:
+        device = DeviceInfoMessage()
+        device.timestamp = start_ms
+        device.device_index = 0
+        device.manufacturer = (
+            manufacturer if manufacturer is not None else Manufacturer.DEVELOPMENT
+        )
+        device.product = product if product is not None else 0
+        device.product_name = device_model
+        builder.add(device)
 
     start_event = EventMessage()
     start_event.event = Event.TIMER

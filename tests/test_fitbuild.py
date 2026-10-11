@@ -137,6 +137,26 @@ def test_outdoor_run_includes_positions() -> None:
     assert rows[1]["heart_rate"] == 151
 
 
+def test_device_model_emits_device_info() -> None:
+    workout = make_workout(discipline="yoga", title="Yoga Flow")
+    result = build_activity_fit(
+        workout, None, manufacturer=294, product=822, device_model="COROS APEX 2 Pro"
+    )
+    fit = FitFile.from_bytes(result.data)
+    assert not fit.validate().has_errors, fit.validate().errors
+    device = data_rows(result.data, "device_info")[0]
+    assert device["manufacturer"] == 294
+    assert device["product"] == 822
+    assert device["product_name"] == "COROS APEX 2 Pro"
+    file_id = data_rows(result.data, "file_id")[0]
+    assert file_id["manufacturer"] == 294
+
+
+def test_no_device_info_by_default() -> None:
+    result = build_activity_fit(make_workout(), None)
+    assert data_rows(result.data, "device_info") == []
+
+
 def test_summary_only_build_for_strength() -> None:
     workout = make_workout(discipline="strength", title="Strength 30")
     result = build_activity_fit(workout, None)

@@ -126,26 +126,8 @@ def main() -> int:
     return 0
 
 
-#: (FIT Sport, FIT SubSport) → COROS activity/query sportType codes
-_COROS_SPORT_CODES = {
-    ("CYCLING", "INDOOR_CYCLING"): 201,
-    ("CYCLING", None): 200,
-    ("RUNNING", "TREADMILL"): 101,
-    ("RUNNING", None): 100,
-    ("ROWING", "INDOOR_ROWING"): 701,
-    ("ROWING", None): 700,
-    ("TRAINING", "STRENGTH_TRAINING"): 402,
-    ("TRAINING", "YOGA"): 904,
-    ("TRAINING", "PILATES"): 905,
-    ("WALKING", None): 900,
-    ("WALKING", "INDOOR_WALKING"): 900,
-}
-
-
 def _expected_coros_sport(rec: WorkoutRecord) -> int | None:
-    mapping = mapping_for((rec.discipline or "").strip().lower())
-    code = _COROS_SPORT_CODES.get((mapping.sport.name, mapping.sub_sport.name if mapping.sub_sport else None))
-    return code
+    return coros_sport_code((rec.discipline or "").strip().lower())
 
 
 def _match(rec: WorkoutRecord, activities: list[ActivityItem]) -> tuple[ActivityItem | None, str]:

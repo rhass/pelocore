@@ -6,6 +6,7 @@ import pytest
 
 from pelocore.config import Settings
 from pelocore.coros import UploadResult
+from pelocore.fitbuild import CONVERTER_VERSION
 from pelocore.peloton import WorkoutPerformance
 from pelocore.state import StateStore
 from pelocore.sync import SyncEngine, fit_filename
@@ -32,7 +33,10 @@ def test_two_workouts_uploaded_then_skipped(store: StateStore, settings: Setting
     assert report.failed == 0
     assert report.outcome == "ok"
     assert len(coros.uploads) == 2
-    assert [f for _, f in coros.uploads] == [fit_filename("w1"), fit_filename("w2")]
+    assert [f for _, f in coros.uploads] == [
+        fit_filename("w1", version=CONVERTER_VERSION),
+        fit_filename("w2", version=CONVERTER_VERSION),
+    ]
 
     # second cycle: local state dedupes
     report2 = engine.run_cycle(trigger="cli")
@@ -42,7 +46,7 @@ def test_two_workouts_uploaded_then_skipped(store: StateStore, settings: Setting
 
 def test_reconcile_dedupe_on_fresh_state(store: StateStore, settings: Settings) -> None:
     peloton = FakePeloton(workouts=[make_workout("w1")], performances={"w1": cycling_performance()})
-    coros = FakeCoros(imported={fit_filename("w1")})
+    coros = FakeCoros(imported={fit_filename("w1", version=CONVERTER_VERSION)})
     engine = build_engine(peloton, coros, store, settings)
     report = engine.run_cycle()
     assert report.uploaded == 0

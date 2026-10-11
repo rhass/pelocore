@@ -33,13 +33,14 @@ Peloton API ──► FIT builder ──► zip+md5 ──► COROS upload ─�
 - **One-shot or service**: `pelocore sync` for k8s CronJobs, `pelocore run`
   for a long-running Deployment with the status server.
 
-### Limitations (COROS-side; documented so you do not file these as bugs)
+### Limitations
 
-What COROS does with an imported activity is decided by its importer from
-the FIT encoding alone. We mapped that behavior exhaustively by re-uploading
-one real session with every candidate encoding
+What COROS does with an imported activity is decided by its importer, based
+on the FIT encoding alone. I mapped that behavior exhaustively by
+re-uploading one real session with every candidate encoding
 ([scripts/experiment_stretch_sport.py](scripts/experiment_stretch_sport.py));
-the full importer model lives in [AGENTS.md](AGENTS.md). The consequences:
+the full importer model lives in [AGENTS.md](AGENTS.md). What that means in
+practice:
 
 - **yoga, stretching and meditation import as Gym Cardio (400)**. COROS's
   import pipeline cannot produce its Yoga category (904) - that exists only

@@ -212,11 +212,11 @@ docstrings of `coros.py` and `peloton.py`. Non-obvious traps:
 - Activity files need at least one `record`; summary-only workouts get a
   timestamp-only anchor record.
 - fit_tool cannot parse COROS's own exports (nonstandard field sizes in
-  event and field_description messages). Our generated files validate.
+  event and field_description messages). pelocore's generated files validate.
 - Debugging FIT contents: `uv run pelocore fitdump <file> [--json]
   [--records N] [--trace]` (`fitdump.py`). It walks raw records with no
   profile assumptions and never fails on vendor quirks; use it on COROS
-  exports and to verify our generated files.
+  exports and to verify pelocore's generated files.
 - Message numbering gotcha confirmed empirically: fit_tool writes the
   activity message as gnum 34 and exercise_title as gnum 264 (not the
   140/229 one might expect); COROS's own exports agree on 34.

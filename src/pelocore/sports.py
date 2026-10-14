@@ -130,11 +130,13 @@ COROS_IMPORT_CODES: dict[str, int] = {
 }
 
 
-def coros_sport_code(fitness_discipline: str) -> int | None:
+def coros_sport_code(
+    fitness_discipline: str, *, remaps: dict[str, str] | None = None
+) -> int | None:
     """COROS ``sportType`` code an imported file for this discipline receives,
     or None when the importer does not map it. Remaps are applied first so the
     hint matches the file build_activity_fit actually produces."""
-    effective = remap_discipline(fitness_discipline)
+    effective = remap_discipline(fitness_discipline, remaps)
     mapping = mapping_for(effective)
     if mapping.sub_sport is not None:
         pair = COROS_PAIR_CODES.get((mapping.sport.name, mapping.sub_sport.name))

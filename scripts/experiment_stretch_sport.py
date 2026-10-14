@@ -68,6 +68,7 @@ WINDOW_S = 60
 
 def synthetic_mappings() -> dict[str, SportMapping]:
     return {
+        "exptrainingyoga": SportMapping(Sport.TRAINING, SubSport.YOGA, "Yoga"),
         "expjumprope": SportMapping(Sport.JUMP_ROPE, None, "Jump Rope"),
         "expgenericyoga": SportMapping(Sport.GENERIC, SubSport.YOGA, "Generic Yoga"),
         "exprun": SportMapping(Sport.RUNNING, SubSport.TREADMILL, "Treadmill"),
@@ -99,9 +100,11 @@ def build_trial(workout, perf, tag: str) -> tuple[str, bytes, str]:
     tagged = dataclasses.replace(workout, id=f"{workout.id}-{tag.lower()}")
     filename = f"exp-stretch-{tag.lower()}.fit"
     if tag == "T1":
+        sports.DISCIPLINE_MAP.update(synthetic_mappings())
         built = build_activity_fit(
             tagged,
             perf,
+            remaps={"stretching": "exptrainingyoga"},
             manufacturer=COROS_MANUFACTURER,
             product=COROS_PRODUCT,
             device_model="COROS APEX 2 Pro",

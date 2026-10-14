@@ -267,7 +267,7 @@ class SyncEngine:
         blind. Returns True when the slot is clear for re-upload.
         """
         try:
-            code = coros_sport_code(workout.fitness_discipline)
+            code = coros_sport_code(workout.fitness_discipline, remaps=self._remaps)
             old = self._coros.find_activity(workout.start_time, code)
         except CorosAmbiguousMatchError as exc:
             report.errors.append(
@@ -400,7 +400,7 @@ class SyncEngine:
         try:
             renamed = self._coros.rename_after_import(
                 workout.start_time,
-                coros_sport_code(workout.fitness_discipline),
+                coros_sport_code(workout.fitness_discipline, remaps=self._remaps),
                 display_name(workout.title, workout.instructor),
                 timeout_s=self._settings.import_poll_seconds,
             )
@@ -431,7 +431,9 @@ class SyncEngine:
             try:
                 done = self._coros.rename_after_import(
                     rec.start_time,
-                    coros_sport_code((rec.discipline or "").strip().lower()),
+                    coros_sport_code(
+                        (rec.discipline or "").strip().lower(), remaps=self._remaps
+                    ),
                     name,
                     timeout_s=15.0,
                     interval_s=5.0,

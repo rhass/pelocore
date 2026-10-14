@@ -108,6 +108,7 @@ def test_coros_sport_codes_match_importer_table() -> None:
     assert coros_sport_code("circuit") == 402
     assert coros_sport_code("bike_bootcamp") == 402
     assert coros_sport_code("walking") is None
+    assert coros_sport_code("stretching", remaps={"stretching": "strength"}) == 402
 
 
 def test_remap_extra_overrides_builtin() -> None:

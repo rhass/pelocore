@@ -1,6 +1,6 @@
 [project]
 name = "pelocore"
-version = "0.2.1"
+version = "0.2.2"
 description = "Bridge that syncs Peloton workouts to COROS as FIT files"
 readme = "README.md"
 license = { text = "Apache-2.0" }
